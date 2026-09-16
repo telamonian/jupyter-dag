@@ -160,9 +160,15 @@ function activate(app: JupyterFrontEnd): void {}
 
 **❌ Don't**: Duplicate business logic across TypeScript and Python
 
+#### normal Code Organization rules
+
 **✅ Do**: Implement features completely or not at all. Notify the prompter if you're unable to completely implement a feature.
 
 **❌ Don't**: Leave TODO comments or dead code in committed files
+
+#### Code Organization rules when I specifically ask for stubs, skeleton, "just the imports", etc
+
+**✅ Do**: Feel free to have incomplete features, given that I asked for them specifically. Leave TODO comments on unfinished feautures, and wherever else makes sense when making stubs, skeleton, "just the imports", etc
 
 ## Project Structure and Naming
 

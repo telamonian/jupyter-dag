@@ -1,8 +1,159 @@
 {
+  "jupyter.lab.transform": true,
   "jupyter.lab.shortcuts": [],
+  "jupyter.lab.toolbars": {
+    "Notebook": [
+      {
+        "name": "openDag",
+        "command": "jupyter-dag:open",
+        "rank": 10
+      }
+    ],
+    "DAG": [
+      {
+        "name": "runDag",
+        "command": "jupyter-dag:run-all",
+        "rank": 10
+      },
+      {
+        "name": "autoLayout",
+        "command": "jupyter-dag:auto-layout",
+        "rank": 20
+      }
+    ]
+  },
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-view",
+        "items": [
+          {
+            "command": "jupyter-dag:open",
+            "rank": 30
+          }
+        ]
+      }
+    ]
+  },
+  "definitions": {
+    "toolbarItem": {
+      "properties": {
+        "name": {
+          "title": "Unique name",
+          "type": "string"
+        },
+        "args": {
+          "title": "Command arguments",
+          "type": "object"
+        },
+        "command": {
+          "title": "Command id",
+          "type": "string",
+          "default": ""
+        },
+        "disabled": {
+          "title": "Whether the item is ignored or not",
+          "type": "boolean",
+          "default": false
+        },
+        "icon": {
+          "title": "Item icon id",
+          "description": "If defined, it will override the command icon",
+          "type": "string"
+        },
+        "label": {
+          "title": "Item label",
+          "description": "If defined, it will override the command label",
+          "type": "string"
+        },
+        "caption": {
+          "title": "Item caption",
+          "description": "If defined, it will override the command caption",
+          "type": "string"
+        },
+        "type": {
+          "title": "Item type",
+          "type": "string",
+          "oneOf": [
+            {
+              "const": "command",
+              "title": "Command"
+            },
+            {
+              "const": "spacer",
+              "title": "Spacer"
+            }
+          ]
+        },
+        "rank": {
+          "title": "Item rank",
+          "type": "number",
+          "minimum": 0,
+          "default": 50
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
   "title": "@telamonian/jupyter-dag",
   "description": "@telamonian/jupyter-dag settings.",
   "type": "object",
-  "properties": {},
+  "properties": {
+    "layoutDirection": {
+      "title": "Layout direction",
+      "description": "Direction used by auto layout.",
+      "type": "string",
+      "oneOf": [
+        {
+          "const": "TB",
+          "title": "Top to bottom"
+        },
+        {
+          "const": "LR",
+          "title": "Left to right"
+        }
+      ],
+      "default": "TB"
+    },
+    "maxZoom": {
+      "title": "Maximum zoom",
+      "description": "Upper zoom bound for the DAG canvas; 1 keeps cell editors unscaled.",
+      "type": "number",
+      "default": 1
+    },
+    "outputOnlyNodes": {
+      "title": "Output-only nodes",
+      "description": "Show cell outputs instead of live editors inside nodes.",
+      "type": "boolean",
+      "default": false
+    },
+    "analyzeChannel": {
+      "title": "analyze_request channel",
+      "description": "Kernel channel used for analyze_request.",
+      "type": "string",
+      "oneOf": [
+        {
+          "const": "shell",
+          "title": "Shell"
+        },
+        {
+          "const": "control",
+          "title": "Control"
+        }
+      ],
+      "default": "shell"
+    },
+    "toolbar": {
+      "title": "DAG view toolbar items",
+      "description": "Note: To disable a toolbar item,\ncopy it to User Preferences and add the\n\"disabled\" key. Toolbar description:",
+      "items": {
+        "$ref": "#/definitions/toolbarItem"
+      },
+      "type": "array",
+      "default": []
+    }
+  },
   "additionalProperties": false
 }

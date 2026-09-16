@@ -1,0 +1,327 @@
+import { KernelMessage } from '@jupyterlab/services';
+import type { Kernel } from '@jupyterlab/services';
+import type { ISessionContext } from '@jupyterlab/apputils';
+import { PromiseDelegate } from '@lumino/coreutils';
+import type { JSONObject, JSONValue } from '@lumino/coreutils';
+import { Signal } from '@lumino/signaling';
+import type { ISignal } from '@lumino/signaling';
+import type { IDisposable } from '@lumino/disposable';
+
+// Must match jupyter_dag/protocol.py verbatim; jupyter_dag/tests/test_protocol.py checks.
+export const KERNEL_NAME = 'jupyter-dag';
+export const COMM_TARGET = 'jupyter-dag';
+export const FEATURE_ANALYZE = 'cell analysis';
+export const FEATURE_NAMESPACE_DELETE = 'namespace delete';
+export const FEATURE_NAMESPACE_DELTA = 'namespace delta';
+export const ANALYZE_REQUEST = 'analyze_request';
+export const ANALYZE_REPLY = 'analyze_reply';
+
+export interface IAnalyzeCellInput {
+  cell_id: string;
+  code: string;
+}
+export interface IAnalyzeRequestContent {
+  cells: IAnalyzeCellInput[];
+}
+export interface IAnalyzedCellOk {
+  cell_id: string;
+  status: 'ok' | 'opaque';
+  defined: string[];
+  referenced: string[];
+  deleted: string[];
+  dynamic: boolean;
+}
+export interface IAnalyzedCellError {
+  cell_id: string;
+  status: 'error';
+  ename: string;
+  evalue: string;
+}
+export type IAnalyzedCell = IAnalyzedCellOk | IAnalyzedCellError;
+export interface IAnalyzeReplyOk extends KernelMessage.IReplyOkContent {
+  cells: IAnalyzedCell[];
+}
+// ReplyContent<T> is not exported from @jupyterlab/services; spell the union out.
+export type IAnalyzeReplyContent =
+  IAnalyzeReplyOk | KernelMessage.IReplyErrorContent | KernelMessage.IReplyAbortContent;
+export interface INamespaceDelta {
+  added: string[];
+  removed: string[];
+}
+export type IDagExecuteRequestContent = KernelMessage.IExecuteRequestMsg['content'] & {
+  namespace_delete?: string[];
+  namespace_set?: JSONObject;
+};
+export type IDagExecuteReplyContent = KernelMessage.IExecuteReplyMsg['content'] & { namespace_delta?: INamespaceDelta };
+export type AnalyzeChannel = 'shell' | 'control';
+
+export function readNamespaceDelta(reply: KernelMessage.IExecuteReplyMsg | undefined): INamespaceDelta | undefined {
+  if (!reply || reply.content.status !== 'ok') {
+    return undefined;
+  }
+  return (reply.content as IDagExecuteReplyContent).namespace_delta;
+}
+
+export interface IDagTransport extends IDisposable {
+  analyze(content: IAnalyzeRequestContent): Promise<IAnalyzeReplyOk>;
+}
+
+// KernelMessage's message-type unions are closed, so a known request type stands in for analyze_request.
+type ShellStandIn = KernelMessage.IIsCompleteRequestMsg;
+type ControlStandIn = KernelMessage.IDebugRequestMsg;
+
+/** analyze_request as a real shell (or control) message: the protocol as designed. */
+export class ShellTransport implements IDagTransport {
+  constructor(
+    private _kernel: Kernel.IKernelConnection,
+    private _channel: AnalyzeChannel = 'shell'
+  ) {}
+  async analyze(content: IAnalyzeRequestContent): Promise<IAnalyzeReplyOk> {
+    const kernel = this._kernel;
+    const envelope = { session: kernel.clientId, username: kernel.username, subshellId: kernel.subshellId };
+    let replyContent: unknown;
+    if (this._channel === 'control') {
+      const msg = KernelMessage.createMessage<ControlStandIn>({
+        ...envelope,
+        msgType: ANALYZE_REQUEST as 'debug_request',
+        channel: 'control',
+        content: content as unknown as ControlStandIn['content']
+      });
+      replyContent = (await kernel.sendControlMessage(msg, true, true).done).content;
+    } else {
+      const msg = KernelMessage.createMessage<ShellStandIn>({
+        ...envelope,
+        msgType: ANALYZE_REQUEST as 'is_complete_request',
+        channel: 'shell',
+        content: content as unknown as ShellStandIn['content']
+      });
+      replyContent = (await kernel.sendShellMessage(msg, true, true).done).content;
+    }
+    const c = replyContent as IAnalyzeReplyContent;
+    if (c.status !== 'ok') {
+      throw new Error(`analyze_request failed: ${c.status}`);
+    }
+    return c;
+  }
+  get isDisposed(): boolean {
+    return this._isDisposed;
+  }
+  dispose(): void {
+    this._isDisposed = true;
+  }
+  private _isDisposed = false;
+}
+
+interface ICommPayload {
+  type: string;
+  supported_features?: string[];
+}
+
+/**
+ * The no-protocol-change prototype: the same payloads over the `jupyter-dag` comm target.
+ * Replies ride the request's comm future (ipykernel stamps them with the request as parent);
+ * kernel-initiated messages (namespace_delta) arrive through comm.onMsg.
+ */
+export class CommTransport implements IDagTransport {
+  constructor(private _kernel: Kernel.IKernelConnection) {}
+  get namespaceDelta(): ISignal<this, INamespaceDelta> {
+    return this._delta;
+  }
+  /** Advertised by the kernel on comm open (a stock kernel after %load_ext never updates kernel_info). */
+  get features(): ReadonlySet<string> {
+    return this._features;
+  }
+  async open(): Promise<void> {
+    const kernel = this._kernel;
+    if (!kernel.handleComms) {
+      throw new Error('comms are disabled on this kernel connection');
+    }
+    const comm = kernel.createComm(COMM_TARGET); // a fresh comm id each time: reuse after reconnect throws
+    comm.onMsg = (msg: KernelMessage.ICommMsgMsg) => {
+      const data = msg.content.data as unknown as ICommPayload;
+      if (data.type === 'namespace_delta') {
+        this._delta.emit(data as unknown as INamespaceDelta);
+      } else if (data.type === 'features') {
+        this._features = new Set(data.supported_features ?? []);
+      }
+    };
+    comm.onClose = () => {
+      this._comm = null;
+    };
+    await comm.open().done;
+    if (comm.isDisposed) {
+      throw new Error(`the kernel has no '${COMM_TARGET}' comm target`);
+    }
+    this._comm = comm;
+  }
+  async analyze(content: IAnalyzeRequestContent): Promise<IAnalyzeReplyOk> {
+    if (!this._comm) {
+      await this.open();
+    }
+    const comm = this._comm!;
+    const reply = new PromiseDelegate<IAnalyzeReplyOk>();
+    let settled = false;
+    const future = comm.send({ type: ANALYZE_REQUEST, ...content } as unknown as JSONValue);
+    future.onIOPub = (msg: KernelMessage.IIOPubMessage) => {
+      if (KernelMessage.isCommMsgMsg(msg) && msg.content.comm_id === comm.commId) {
+        settled = true;
+        const c = msg.content.data as unknown as IAnalyzeReplyContent;
+        if (c.status === 'ok') {
+          reply.resolve(c);
+        } else {
+          reply.reject(new Error(`analyze failed: ${c.status}`));
+        }
+      }
+    };
+    await future.done;
+    if (!settled) {
+      reply.reject(new Error('no analyze reply on the comm'));
+    }
+    return reply.promise;
+  }
+  async namespaceDelete(names: string[]): Promise<void> {
+    if (!this._comm) {
+      await this.open();
+    }
+    await this._comm!.send({ type: 'namespace_delete', names } as unknown as JSONValue).done;
+  }
+  get isDisposed(): boolean {
+    return this._isDisposed;
+  }
+  dispose(): void {
+    if (this._isDisposed) {
+      return;
+    }
+    this._isDisposed = true;
+    this._comm?.close();
+    this._comm?.dispose();
+    Signal.clearData(this);
+  }
+  private _comm: Kernel.IComm | null = null;
+  private _delta = new Signal<this, INamespaceDelta>(this);
+  private _features = new Set<string>();
+  private _isDisposed = false;
+}
+
+/** Per-session client: feature detection from kernel_info, one transport, and the namespace_delta stream. */
+export class DagKernelClient implements IDisposable {
+  constructor(sessionContext: ISessionContext, analyzeChannel: AnalyzeChannel = 'shell') {
+    this._sessionContext = sessionContext;
+    this._analyzeChannel = analyzeChannel;
+    sessionContext.kernelChanged.connect(this._onKernelChanged, this);
+    sessionContext.statusChanged.connect(this._onStatusChanged, this);
+  }
+  get kernel(): Kernel.IKernelConnection | null | undefined {
+    return this._sessionContext.session?.kernel;
+  }
+  get features(): ReadonlySet<string> {
+    return this._features;
+  }
+  get supportsAnalyze(): boolean {
+    return this._transport !== null;
+  }
+  get namespaceDelta(): ISignal<this, INamespaceDelta> {
+    return this._namespaceDelta;
+  }
+  get ready(): Promise<void> {
+    return this._ready.promise;
+  }
+  async detectFeatures(): Promise<ReadonlySet<string>> {
+    const kernel = this.kernel;
+    if (!kernel) {
+      this._transport?.dispose();
+      this._transport = null;
+      this._features = new Set();
+      return this._features;
+    }
+    // kernel_info_reply.supported_features is the source of truth; `info` is the connection's first reply.
+    const info = await kernel.info;
+    this._features = new Set(info.supported_features ?? []);
+    this._transport?.dispose();
+    this._transport = null;
+    if (this._features.has(FEATURE_ANALYZE)) {
+      this._transport = new ShellTransport(kernel, this._analyzeChannel);
+    } else {
+      // e.g. a stock kernel after `%load_ext jupyter_dag`: kernel_info was answered before the extension loaded.
+      const comm = new CommTransport(kernel);
+      comm.namespaceDelta.connect((_, d) => this._namespaceDelta.emit(d));
+      try {
+        await comm.open();
+        this._transport = comm;
+        this._features = new Set([...this._features, ...comm.features]);
+      } catch {
+        comm.dispose();
+      }
+    }
+    this._ready.resolve();
+    return this._features;
+  }
+  async analyze(cells: IAnalyzeCellInput[]): Promise<IAnalyzedCell[]> {
+    if (!this._transport && this.kernel) {
+      await this.detectFeatures(); // e.g. `%load_ext jupyter_dag` ran after this view attached
+    }
+    if (!this._transport) {
+      throw new Error('no DAG transport');
+    }
+    const reply = await this._transport.analyze({ cells });
+    return reply.cells;
+  }
+  /** Unbind names in the kernel: over the comm when that is the transport, else a silent execute_request. */
+  async namespaceDelete(names: string[]): Promise<void> {
+    if (this._transport instanceof CommTransport) {
+      return this._transport.namespaceDelete(names);
+    }
+    await this.requestExecute({ code: '', silent: true, store_history: false, namespace_delete: names }).done;
+  }
+  /** Raw execute with namespace_delete; `code: ''` + silent = 'purge without running'. */
+  requestExecute(
+    content: IDagExecuteRequestContent,
+    metadata?: JSONObject
+  ): Kernel.IShellFuture<KernelMessage.IExecuteRequestMsg, KernelMessage.IExecuteReplyMsg> {
+    const future = this.kernel!.requestExecute(
+      content as unknown as KernelMessage.IExecuteRequestMsg['content'],
+      true, // dispose the future when done; nothing keeps it
+      metadata
+    );
+    future.onReply = (msg: KernelMessage.IExecuteReplyMsg) => {
+      const d = readNamespaceDelta(msg);
+      if (d) {
+        this._namespaceDelta.emit(d);
+      }
+    };
+    return future;
+  }
+  private _onKernelChanged(): void {
+    this._ready = new PromiseDelegate<void>();
+    void this.detectFeatures();
+  }
+  private _onStatusChanged(_: ISessionContext, status: Kernel.Status): void {
+    if (status === 'restarting' || status === 'autorestarting') {
+      this._transport?.dispose();
+      this._transport = null;
+      this._redetect = true;
+    } else if (status === 'idle' && this._redetect) {
+      this._redetect = false;
+      void this.detectFeatures();
+    }
+  }
+  get isDisposed(): boolean {
+    return this._isDisposed;
+  }
+  dispose(): void {
+    if (this._isDisposed) {
+      return;
+    }
+    this._isDisposed = true;
+    this._transport?.dispose();
+    Signal.clearData(this);
+  }
+  private _sessionContext: ISessionContext;
+  private _analyzeChannel: AnalyzeChannel;
+  private _features = new Set<string>();
+  private _transport: IDagTransport | null = null;
+  private _namespaceDelta = new Signal<this, INamespaceDelta>(this);
+  private _ready = new PromiseDelegate<void>();
+  private _redetect = false;
+  private _isDisposed = false;
+}

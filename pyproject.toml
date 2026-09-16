@@ -23,7 +23,12 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "jupyter_server>=2.13.0,<3"
+    "jupyter_server>=2.13.0,<3",
+    "ipykernel>=7.3,<8",
+    "ipython>=8.10",
+    "jupyter_client>=8.6,<9",
+    "comm>=0.2",
+    "traitlets>=5.9",
 ]
 dynamic = ["version", "description", "authors", "urls", "keywords"]
 
@@ -37,8 +42,15 @@ test = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    "pytest-timeout",
     "pytest-jupyter[server]>=0.6.0"
 ]
+
+[project.scripts]
+jupyter-dag-kernel = "jupyter_dag.kernel.install:main"
+
+[project.entry-points."jupyter_client.kernel_provisioners"]
+jupyter-dag-provisioner = "jupyter_dag.provisioner:DagKernelProvisioner"
 
 [tool.hatch.version]
 source = "nodejs"
@@ -54,6 +66,7 @@ exclude = [".github", "binder", ".claude"]
 "jupyter_dag/labextension" = "share/jupyter/labextensions/@telamonian/jupyter-dag"
 "install.json" = "share/jupyter/labextensions/@telamonian/jupyter-dag/install.json"
 "jupyter-config/server-config" = "etc/jupyter/jupyter_server_config.d"
+"jupyter-config/kernels/jupyter-dag" = "share/jupyter/kernels/jupyter-dag"
 
 [tool.hatch.build.hooks.version]
 path = "jupyter_dag/_version.py"
