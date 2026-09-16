@@ -40,6 +40,7 @@ export class DagExecutor implements IDisposable {
     this._sessionDialogs = options.sessionDialogs ?? new SessionContextDialogs({ translator: this._translator });
     NotebookActions.executed.connect(this._onExecuted, this);
     NotebookActions.executionScheduled.connect(this._onScheduled, this);
+    NotebookActions.selectionExecuted.connect(this._onSelectionExecuted, this);
     NotebookActions.outputCleared.connect(this._onOutputCleared, this);
   }
   get stateChanged(): ISignal<this, IDagRunEvent> {
@@ -158,6 +159,10 @@ export class DagExecutor implements IDisposable {
     if (args.notebook.model === this._graph.notebook) {
       this._graph.setState(args.cell.model.id, 'queued');
     }
+  }
+  private _onSelectionExecuted(_: unknown, args: { notebook: Notebook; lastCell: Cell }): void {
+    // TODO: recompute staleness once per batch (run-all / run-selected) instead of per cell in _onExecuted.
+    void args;
   }
   private _onOutputCleared(_: unknown, args: { notebook: Notebook; cell: Cell }): void {
     if (args.notebook.model === this._graph.notebook) {

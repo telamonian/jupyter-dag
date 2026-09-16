@@ -17,6 +17,7 @@ import {
   getBezierPath,
   reconnectEdge,
   useNodesInitialized,
+  useOnSelectionChange,
   useReactFlow,
   useStore
 } from '@xyflow/react';
@@ -32,8 +33,10 @@ import type {
   NodeChange,
   OnBeforeDelete,
   OnConnect,
+  OnConnectEnd,
   OnEdgesChange,
   OnNodesChange,
+  OnSelectionChangeFunc,
   ReactFlowInstance,
   Viewport
 } from '@xyflow/react';
@@ -289,6 +292,17 @@ function DagFlow({ graph, settings, layoutRequested, onInit }: IDagCanvasProps):
     },
     [model]
   );
+  const onConnectEnd: OnConnectEnd = useCallback((_event, state) => {
+    if (!state.toNode) {
+      // TODO: a wire dropped on empty canvas should insert a new cell there and wire it
+      // (model.sharedModel.insertCell + addWire): the litegraph "drag out a node" gesture.
+    }
+  }, []);
+  const onSelectionChange: OnSelectionChangeFunc<CellNode, DagEdge> = useCallback(({ nodes: selected }) => {
+    // TODO: mirror the selection to the notebook panel's activeCell (and back) so both views agree.
+    void selected;
+  }, []);
+  useOnSelectionChange({ onChange: onSelectionChange });
   // Backspace on a selected node must not delete the cell's wires behind its back: only selected edges go.
   const onBeforeDelete: OnBeforeDelete<CellNode, DagEdge> = useCallback(
     async ({ edges: toDelete }) => ({ nodes: [], edges: toDelete.filter(e => e.selected) }),
@@ -308,6 +322,7 @@ function DagFlow({ graph, settings, layoutRequested, onInit }: IDagCanvasProps):
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
+      onConnectEnd={onConnectEnd}
       onReconnect={onReconnect}
       onBeforeDelete={onBeforeDelete}
       onMoveEnd={onMoveEnd}

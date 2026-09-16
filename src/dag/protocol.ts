@@ -123,7 +123,15 @@ interface ICommPayload {
  * kernel-initiated messages (namespace_delta) arrive through comm.onMsg.
  */
 export class CommTransport implements IDagTransport {
-  constructor(private _kernel: Kernel.IKernelConnection) {}
+  constructor(private _kernel: Kernel.IKernelConnection) {
+    // TODO: kernel-initiated comms (the kernel opening `jupyter-dag` towards the frontend, e.g. right
+    // after `%load_ext jupyter_dag`), so the kernel can push without the frontend opening a comm first.
+    _kernel.registerCommTarget(COMM_TARGET, this._onKernelInitiated);
+  }
+  private _onKernelInitiated = (comm: Kernel.IComm, msg: KernelMessage.ICommOpenMsg): void => {
+    void msg.content.target_name;
+    void comm; // TODO: adopt it as this._comm and attach onMsg / onClose exactly as open() does
+  };
   get namespaceDelta(): ISignal<this, INamespaceDelta> {
     return this._delta;
   }
@@ -193,6 +201,7 @@ export class CommTransport implements IDagTransport {
       return;
     }
     this._isDisposed = true;
+    this._kernel.removeCommTarget(COMM_TARGET, this._onKernelInitiated);
     this._comm?.close();
     this._comm?.dispose();
     Signal.clearData(this);
