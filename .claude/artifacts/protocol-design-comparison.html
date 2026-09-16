@@ -1,0 +1,385 @@
+<title>Jupyter-DAG Protocol Designs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F4F5F7; --surface:#FFFFFF; --ink:#1B1E24; --muted:#5F6873; --rule:#D8DCE3; --rule-soft:#E8EBF0;
+  --old:#4C57A8; --old-soft:#EEF0FA; --new:#0F7A6B; --new-soft:#E8F5F2;
+  --caveat:#9C6A00; --caveat-soft:#FBF3DF; --refuted:#B4322E; --refuted-soft:#FBE9E8; --holds:#2E7D4F; --holds-soft:#E6F3EB;
+  --code-bg:#EEF0F3;
+  --serif:"Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans:"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#14161A; --surface:#1C1F25; --ink:#E7E9ED; --muted:#A3AAB5; --rule:#2B3039; --rule-soft:#232730;
+    --old:#8F98E6; --old-soft:#23263A; --new:#4CBBA6; --new-soft:#173129;
+    --caveat:#E0AD3A; --caveat-soft:#33291A; --refuted:#E5736E; --refuted-soft:#3A2323; --holds:#63B57F; --holds-soft:#1D3327;
+    --code-bg:#242830;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#14161A; --surface:#1C1F25; --ink:#E7E9ED; --muted:#A3AAB5; --rule:#2B3039; --rule-soft:#232730;
+  --old:#8F98E6; --old-soft:#23263A; --new:#4CBBA6; --new-soft:#173129;
+  --caveat:#E0AD3A; --caveat-soft:#33291A; --refuted:#E5736E; --refuted-soft:#3A2323; --holds:#63B57F; --holds-soft:#1D3327;
+  --code-bg:#242830;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:24px;padding-block:40px 80px}
+header{border-bottom:1px solid var(--rule);padding-bottom:28px;margin-bottom:36px}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+h1{font-family:var(--serif);font-weight:600;font-size:clamp(30px,4.2vw,44px);line-height:1.12;margin:0 0 14px;text-wrap:balance;letter-spacing:-.01em}
+.lede{max-width:70ch;font-size:17px;color:var(--ink);margin:0 0 20px}
+.tally{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+.chip{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:5px 12px;font-family:var(--mono);font-size:12.5px;line-height:1;border:1px solid transparent}
+.chip b{font-weight:500}
+.chip.caveat{background:var(--caveat-soft);color:var(--caveat);border-color:color-mix(in srgb,var(--caveat) 35%,transparent)}
+.chip.refuted{background:var(--refuted-soft);color:var(--refuted);border-color:color-mix(in srgb,var(--refuted) 35%,transparent)}
+.chip.holds{background:var(--holds-soft);color:var(--holds);border-color:color-mix(in srgb,var(--holds) 35%,transparent)}
+.chip.old{background:var(--old-soft);color:var(--old);border-color:color-mix(in srgb,var(--old) 35%,transparent)}
+.chip.new{background:var(--new-soft);color:var(--new);border-color:color-mix(in srgb,var(--new) 35%,transparent)}
+.tally .note{font-size:13px;color:var(--muted)}
+nav.toc{margin:0 0 40px;padding:18px 22px;background:var(--surface);border:1px solid var(--rule);border-radius:8px}
+nav.toc p{margin:0 0 8px;font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+nav.toc ol{margin:0;padding-left:20px;columns:2;column-gap:32px;font-size:14.5px}
+nav.toc li{break-inside:avoid;margin:2px 0}
+nav.toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+nav.toc a:hover,nav.toc a:focus-visible{border-bottom-color:var(--ink)}
+section{margin:0 0 56px}
+h2{font-family:var(--serif);font-weight:600;font-size:28px;line-height:1.2;margin:0 0 6px;text-wrap:balance;letter-spacing:-.005em}
+h2 .num{color:var(--muted);font-family:var(--mono);font-size:14px;font-weight:400;letter-spacing:.06em;margin-right:12px;vertical-align:middle}
+h3{font-family:var(--sans);font-weight:600;font-size:18px;margin:34px 0 8px;text-wrap:balance}
+p{max-width:70ch;margin:0 0 14px}
+ul,ol{max-width:72ch;margin:0 0 14px;padding-left:22px}
+li{margin:0 0 7px}
+li>ul{margin-top:6px}
+code{font-family:var(--mono);font-size:.9em;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+pre{font-family:var(--mono);font-size:13.5px;line-height:1.5;background:var(--code-bg);border:1px solid var(--rule-soft);border-radius:8px;padding:14px 16px;overflow-x:auto;max-width:100%;margin:0 0 16px}
+pre code{background:none;padding:0;font-size:inherit}
+a{color:inherit}
+.tablewrap{overflow-x:auto;margin:16px 0 22px;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:14.5px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--rule-soft)}
+tr:last-child td{border-bottom:none}
+th{font-family:var(--mono);font-weight:500;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:color-mix(in srgb,var(--surface) 70%,var(--ground));border-bottom:1px solid var(--rule)}
+th.old,td.oldcol{border-top:3px solid transparent}
+thead th.old{color:var(--old);border-top:3px solid var(--old)}
+thead th.new{color:var(--new);border-top:3px solid var(--new)}
+td:first-child{font-weight:500;width:22%}
+.duel{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:14px 0 14px}
+.side{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:16px 18px 14px;position:relative}
+.side .label{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid var(--rule-soft)}
+.side.old .label{color:var(--old)}
+.side.new .label{color:var(--new)}
+.side.old{border-top:3px solid var(--old)}
+.side.new{border-top:3px solid var(--new)}
+.side p:last-child,.side ul:last-child{margin-bottom:0}
+.side p,.side ul{font-size:15px;max-width:none}
+.found{margin:8px 0 8px;padding:16px 20px 10px;border-left:3px solid var(--caveat);background:color-mix(in srgb,var(--caveat-soft) 55%,var(--surface))}
+.found .label{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--caveat);margin:0 0 10px}
+.found ul{max-width:none;margin-bottom:6px}
+.found li{font-size:15px}
+.verdict{margin:14px 0 8px;padding:12px 16px;border-radius:6px;background:var(--surface);border:1px solid var(--rule);max-width:none;font-size:15px}
+.verdict b{font-family:var(--mono);font-weight:500;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:10px}
+.decisions li{margin-bottom:12px}
+.decisions li b{font-weight:600}
+.rec{color:var(--new);font-weight:500}
+.conclusion{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--new);border-radius:8px;padding:20px 24px}
+.conclusion p{max-width:72ch}
+footer{border-top:1px solid var(--rule);margin-top:40px;padding-top:16px;font-size:13.5px;color:var(--muted);max-width:none}
+footer code{font-size:12.5px}
+@media (max-width:720px){
+  nav.toc ol{columns:1}
+  .duel{grid-template-columns:1fr}
+  .wrap{padding-block:28px 60px}
+  td:first-child{width:auto}
+}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important}}
+:focus-visible{outline:2px solid var(--new);outline-offset:2px}
+</style>
+
+<div class="wrap">
+<header>
+  <p class="kicker">jupyter-dag · kernel messaging protocol · September 14, 2026</p>
+  <h1>Two kernel-protocol designs for jupyter-dag, compared</h1>
+  <p class="lede">The design in <code>kernel-design-notes.md</code> (sections 2 and 3, here <span style="color:var(--old);font-weight:500">the notes' design</span>) against the simplification proposed the same day (here <span style="color:var(--new);font-weight:500">the simplified design</span>). Five independent analyses, then forty-six adversarial checks of the simplified design's load-bearing claims against ipykernel 7.3, IPython 9.17, JupyterLab 4.7.0a1, the messaging spec, JEPs 47, 80, 91 and 92, and the sources of Pluto, marimo, papermill, Kishu, xeus, IRkernel, IJulia and Deno, with live experiments where a behavior could be exercised.</p>
+  <div class="tally">
+    <span class="chip caveat"><b>45</b> hold with caveats</span>
+    <span class="chip refuted"><b>1</b> refuted</span>
+    <span class="chip holds"><b>0</b> hold cleanly</span>
+    <span class="note">The caveats are the content of this page.</span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#glance">The two designs in one table</a></li>
+    <li><a href="#shared">What they share</a></li>
+    <li><a href="#items">Item by item</a></li>
+    <li><a href="#plugins">What each plugin can do</a></li>
+    <li><a href="#languages">Per-language feasibility</a></li>
+    <li><a href="#both-wrong">What both got wrong</a></li>
+    <li><a href="#gaps">Gaps neither covers</a></li>
+    <li><a href="#decisions">Decisions, with recommendations</a></li>
+    <li><a href="#conclusion">Conclusion</a></li>
+  </ol>
+</nav>
+
+<section id="glance">
+  <h2><span class="num">1</span>The two designs in one table</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th class="old">notes' design</th><th class="new">simplified design</th></tr></thead>
+    <tbody>
+      <tr><td>Edge analysis</td><td><code>analyze_request</code> on the <b>control</b> channel. Per cell: defines, references, imports, confidence, has_unknown_references.</td><td><code>analyze_request</code> on the <b>shell</b> channel, batch of code strings. Per cell: status, defines, references, one <code>dynamic</code> flag. Imports folded into defines.</td></tr>
+      <tr><td>Delete names</td><td>Standalone <code>namespace_request {delete}</code> on shell.</td><td><code>namespace_delete</code> list on <code>execute_request</code>, applied before the code runs. Purge without running = empty code with <code>silent</code>.</td></tr>
+      <tr><td>Set names from JSON</td><td><code>namespace_request {set: {name: value}}</code>.</td><td>None. Inputs arrive via comms or generated assignment code.</td></tr>
+      <tr><td>Read values</td><td><code>user_expressions</code>.</td><td><code>user_expressions</code>.</td></tr>
+      <tr><td>Runtime delta</td><td><code>execute_reply.namespace_delta {added, rebound, removed}</code>.</td><td><code>execute_reply.namespace_delta {added, removed}</code>, present whenever the kernel advertises it.</td></tr>
+      <tr><td>Branch isolation</td><td><code>create_scope</code>, <code>drop_scope</code>, <code>execute_request.scope</code>. Child is a shallow copy of or chain onto the parent.</td><td>None in the kernel. Frontend enforces one definition per name; isolation comes from a server-level clone.</td></tr>
+      <tr><td>Snapshots</td><td><code>snapshot</code>, <code>restore</code>, list, delete on shell, plus a CRIU provisioner tier and replay.</td><td>Nothing in the kernel protocol. CRIU provisioner and replay behind a server "clone kernel" operation.</td></tr>
+      <tr><td>Channels touched</td><td>shell and control</td><td>shell only; subshells for responsiveness</td></tr>
+      <tr><td>New message pairs</td><td>4, plus 4 for snapshots</td><td>1</td></tr>
+      <tr><td>New fields on existing messages</td><td>2</td><td>2</td></tr>
+      <tr><td>Feature strings</td><td>one per feature, never named</td><td>3, never named</td></tr>
+      <tr><td>Edge meaning</td><td>"B runs after A in one namespace"; value edges deferred</td><td>same</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="shared">
+  <h2><span class="num">2</span>What the two designs share</h2>
+  <p>Both put the same work in the frontend: topological order, cycle detection, staleness, conflict detection, a per-cell ledger of the names defined at the last run, gating on feature strings, and fallback analysis providers for kernels without the feature. Both reuse <code>stop_on_error</code>, <code>silent</code>, <code>cellId</code>, comms, and JEP 92 <code>supported_features</code>. Both defer value-carrying edges.</p>
+  <p>Both plan to prototype over a comm target in ipykernel. A comm target carries either design unchanged, so the footprint question decides what the pre-proposal says, not what can be built before October 19. Both also make the same mistakes, listed in section 6.</p>
+</section>
+
+<section id="items">
+  <h2><span class="num">3</span>Item by item</h2>
+
+  <h3>3.1 Scopes</h3>
+  <div class="duel">
+    <div class="side old"><p class="label">notes' design</p><p><code>create_scope(parent)</code>, a <code>scope</code> field on <code>execute_request</code>, <code>drop_scope</code>. Run a shared prefix once, fork branches that rebind the same names. Child is a shallow dict copy or a lookup chain. Isolation holds "as long as cells rebind rather than mutate". Composes with subshells for concurrent branches. Pluto's workspace modules cited as the Julia version.</p></div>
+    <div class="side new"><p class="label">simplified design</p><p>No scopes. The reactive plugin enforces one definition per name; the DAG plugin enforces or flags the same rule from analysis. Under the rebind contract, branches with disjoint definitions in one namespace cannot interfere. Isolation for mutating code comes from a server-level clone.</p></div>
+  </div>
+  <div class="found"><p class="label">What the review found</p><ul>
+    <li>A lookup chain cannot be Python globals: <code>exec()</code> rejects a <code>ChainMap</code>. A bare dict copy assigned as <code>user_ns</code> breaks closures over cell-level names. A Python scope has to be a fresh module swapped into <code>shell.user_module</code> and <code>shell.user_ns</code> around each execute. Both reproduced in the venv.</li>
+    <li>Isolation is weaker than "rebind, don't mutate". Functions defined before the fork keep <code>__globals__</code> bound to the parent dict, so a child's rebinding is invisible to upstream code and later parent rebinds leak in. Pluto avoids this only by re-running every dependent cell in the new module.</li>
+    <li>Scopes do not compose with subshells as written. <code>InteractiveShell</code> has one <code>user_ns</code> shared by every subshell thread; concurrent per-branch scopes need a context-local namespace inside IPython. <code>%who</code>, the debugger's variable views, and <code>user_expressions</code> would each need a scope parameter.</li>
+    <li>Pluto never forks workspaces. Each <code>workspace#N</code> replaces the last in a linear chain. Pluto is precedent for delete by module migration, not for branch isolation.</li>
+    <li>What the simplified design gives up: two branches that both end in <code>model = fit(...)</code>; in-process parameter sweeps; and JavaScript's only route to "no hidden state", since a fresh context was the only way to make a <code>let</code> binding disappear.</li>
+    <li>The precedent I cited is narrower than I said. marimo, Pluto and Observable enforce one definer per name. No Hex document states such a rule, and Hex ships a fallback that runs cells in notebook order when it cannot infer dependencies.</li>
+    <li>Scopes never delivered isolation beyond the namespace level. RNG state, <code>pd.set_option</code>, the current matplotlib figure, <code>os.chdir</code>, and shared iterators leak through a shallow copy exactly as through one namespace.</li>
+  </ul></div>
+  <p class="verdict"><b>Verdict</b>The cut is sound for the reactive plugin and for a proposal that has to land; scopes are the one item that would be reviewed the way subshells were, and they were unsound as written. It is a real loss for the DAG plugin, and it reduces to one product decision: may two branches of a user-drawn DAG define the same name?</p>
+
+  <h3>3.2 Snapshots and clone</h3>
+  <div class="duel">
+    <div class="side old"><p class="label">notes' design</p><p><code>snapshot_request</code> and <code>restore_request</code> on shell, ordered with executions, plus list and delete. Manifest plus opaque blob; <code>fidelity</code> and <code>uncaptured</code> reporting. Tiers: replay, process-level CRIU via a provisioner ("kernel rebinds ZMQ ports"), language-native serialization. Clone preferred to restore for fan-out.</p></div>
+    <div class="side new"><p class="label">simplified design</p><p>Nothing in the kernel protocol. Replay needs nothing from the kernel; CRIU is a provisioner plus a Jupyter Server REST endpoint; the language-native tier is "the only one that needs kernel messages" and is Python-shaped. The DAG plugin codes against a server-level clone.</p></div>
+  </div>
+  <div class="found"><p class="label">What the review found</p><ul>
+    <li>Restore in place needs no protocol change, if the provisioner uses <code>--tcp-close</code>, keeps jupyter_client's restarter from replacing the kernel during the gap (it polls <code>provisioner.poll()</code> every 3 seconds), keeps the parent pid stable (ipykernel's parent poller exits within a second if it changes), and routes the restore through the existing restart path so JupyterLab clears futures and comms.</li>
+    <li>Clone by "restore one image twice" does not exist on a plain host. CRIU restores the original pid and bound ports; a second copy needs its own pid and network namespace, or kernel-side rebind code. ipykernel binds ports once at startup with no retry when a port is specified; the notes' "kernel rebinds ZMQ ports" describes a mechanism that does not exist. On a plain install the only clone is replay.</li>
+    <li>The language-native tier needs no messages either. Kishu implements checkpoint and checkout with IPython <code>pre_run_cell</code> and <code>post_run_cell</code> hooks plus silent <code>execute_request</code> with <code>user_expressions</code>. Messages buy a language-neutral, advertised contract with fidelity reporting; that is the notes' argument, and it is the right framing.</li>
+    <li>The Kishu figures hold verbatim: CRIU-Incremental up to 36 times slower on checkout for the largest notebook, comparable on checkpoint, faster on 3 of 8 notebooks, failed on 2 of 8.</li>
+  </ul></div>
+  <p class="verdict"><b>Verdict</b>Removing the four message pairs from the kernel protocol is right and costs kernel authors nothing. The consequence for the DAG plugin is that the "isolation tier below" is replay in practice, a full prefix re-run per branch. That raises the price of dropping scopes without reversing it.</p>
+
+  <h3>3.3 Delete</h3>
+  <div class="duel">
+    <div class="side old"><p class="label">notes' design</p><p>A standalone <code>namespace_request {delete: [names]}</code> on the shell channel, before re-running a cell or when a cell is removed. No execution involved.</p></div>
+    <div class="side new"><p class="label">simplified design</p><p>An optional <code>namespace_delete</code> list on <code>execute_request</code>, applied before the code. Purge without running is an execute with empty code and <code>silent</code>. Advertised by a feature string; an unsupported list is silently ignored.</p></div>
+  </div>
+  <div class="found"><p class="label">What the review found</p><ul>
+    <li>Verified against ipykernel 7.3.0: empty code with <code>silent: true</code> does not increment the counter, publishes no <code>execute_input</code>, stores no history, still publishes busy and idle, still evaluates <code>user_expressions</code>, replies <code>ok</code>. Empty code without <code>silent</code> publishes an <code>execute_input</code> with a counter IPython never consumes, so the next cell repeats the prompt number. Silent is mandatory.</li>
+    <li>JupyterLab's <code>CodeCell.execute</code> refuses empty code; purges must call <code>kernel.requestExecute</code> directly.</li>
+    <li>No forced signature change: kernelbase already inspects <code>do_execute</code> for <code>cell_meta</code> and <code>cell_id</code> and passes them only where accepted. <code>namespace_delete</code> slots into the same list; bash_kernel's five-argument <code>do_execute</code> keeps working.</li>
+    <li>Failure differs. The field is silently ignored on a kernel without the feature (verified: <code>x</code> survived) and the cell runs against stale bindings with an <code>ok</code> reply. The notes' unknown message gets no reply at all, so the future hangs. A hang is an availability failure a timeout detects; a skipped delete is a correctness failure nothing detects. Under a gating bug the message fails safe and the field fails unsafe. The fix stays inside the field shape: advertise the string only when <code>do_execute</code> accepts the parameter, and echo removed names in the delta.</li>
+    <li>Abort. <code>dispatch_shell</code> aborts only <code>execute_request</code> after a <code>stop_on_error</code> failure, so a queued silent purge is aborted with the queue: right for rerun purges, wrong for cell-removed purges. A queued <code>namespace_request</code> is never aborted, which is the reverse.</li>
+    <li>The field fixes delete-before-run: a cell that fails has already lost its previous bindings, which is marimo's semantics. The message leaves the choice to the frontend.</li>
+    <li>On this axis the message is the reversible shape: a message can later gain a convenience field; a field cannot be retired without leaving two ways to do one thing.</li>
+    <li>Neither shape says what happens to names that cannot be removed: <code>__builtins__</code>, <code>In</code>, <code>Out</code>, JS <code>let</code>, R locked bindings, Julia consts. <code>execute_reply</code> has no slot for it.</li>
+  </ul></div>
+  <p class="verdict"><b>Verdict</b>The field is the cheaper and tighter shape for the reactive plugin's common path, and delete-then-rerun becomes one atomic message. Its two costs are closable without a new message. Recommendation: the field, with the two mitigations and a <code>not_deleted</code> list on the reply.</p>
+
+  <h3>3.4 Set <span class="chip refuted" style="vertical-align:middle;margin-left:6px">one claim refuted</span></h3>
+  <div class="duel">
+    <div class="side old"><p class="label">notes' design</p><p><code>namespace_request {set: {name: json}}</code>: "a language-agnostic way to bind a name to a JSON-ish value", which is what widget-bound variables, papermill-style parameters, and DAG input ports all reduce to. Costs nothing extra. With <code>user_expressions</code>, emulates value-carrying edges.</p></div>
+    <div class="side new"><p class="label">simplified design</p><p>Dropped. JSON-to-binding is ambiguous in R, JavaScript and Julia, which is why papermill keeps per-language translators; comms already carry widget-bound values. It comes back only if value-carrying edges are chosen later.</p></div>
+  </div>
+  <div class="found"><p class="label">What the review found</p><ul>
+    <li><b>Refuted:</b> "only needed if we later choose value-carrying edges". The notes listed three uses unrelated to value edges. Dropping <code>set</code> does not remove those needs; it moves them. An input cell or parameter on a kernel without a widget library becomes generated assignment source, papermill's translator layer living in the frontend, or does not exist.</li>
+    <li>What held: the ambiguity is real, and the two reactive notebooks that bind JSON values to names both shipped kernel-side conversion hooks for it (Pluto's <code>transform_value</code>, marimo's <code>_convert_value</code>).</li>
+    <li>papermill was the wrong witness. Its translators exist because it injects a source cell and needs each language's literal and assignment syntax; they hard-code one choice per language, do not resolve the numeric ambiguity, and there is no JavaScript translator at all.</li>
+    <li>"Comms already carry widget-bound values" is narrower than it sounds. Comms deliver a value to a trait on a kernel-side widget object, not to a name, and only on kernels with a widget library. Neither design covers Pluto's shape, a bound global name driven by a slider, without frontend bookkeeping from widget id to defining cell to name.</li>
+    <li>Real value-carrying edges need kernel-side handles for arbitrary objects; a JSON <code>set</code> emulates only JSON-representable values, so both designs overstate what <code>set</code> gives.</li>
+  </ul></div>
+  <p class="verdict"><b>Verdict</b>Dropping <code>set</code> is a relocation, not a saving. It is still right for a first version whose thesis is reactive execution, because the spec burden of a per-language coercion table is real and the ambiguity undercuts the notes' "costs nothing extra" too. The decision is where the mapping lives, and it should be stated that way.</p>
+
+  <h3>3.5 The runtime delta</h3>
+  <div class="duel">
+    <div class="side old"><p class="label">notes' design</p><p>Optional <code>namespace_delta: {added, rebound, removed}</code> on <code>execute_reply</code>, from diffing global names and object identity before and after. "It works for languages with no parser support, and it's what ipyflow does inside ipykernel already."</p></div>
+    <div class="side new"><p class="label">simplified design</p><p><code>{added, removed}</code> only, exact set differences, present whenever advertised. Rebound dropped: identity comparison either keeps old values alive or compares recycled ids, and static analysis already reports which names a cell assigns. Gives parser-less kernels such as bash the defines half of an edge for free.</p></div>
+  </div>
+  <div class="found"><p class="label">What the review found</p><ul>
+    <li>Added and removed are cheap (under 3 ms on a 100,000-name namespace). Both rebound problems are real and reproduced: <code>x = None; x = [9,9,9]</code> reports no rebind by id, and the pre-run copy keeps every replaced object alive until the reply.</li>
+    <li>"Exact" is exact only relative to a per-language enumeration the spec has to define. In ipykernel a raw key diff after one run reports <code>_1</code>, <code>_i</code>, <code>_i1</code>, <code>_ii</code>, <code>_iii</code>; the <code>user_ns_hidden</code> identity filter that <code>%who</code> uses is required. In R, <code>library()</code> changes the search path, not <code>globalenv</code>. In Julia, <code>using</code> is invisible before 1.12 and removed is always empty. In JavaScript, <code>let</code> and <code>const</code> are not properties of <code>globalThis</code>. In bash, <code>PIPESTATUS</code>, <code>_</code>, <code>RANDOM</code>, and <code>SECONDS</code> change on their own.</li>
+    <li>Subshells share one namespace, so a before-and-after diff attributes another subshell's assignments to this cell. The field must be present on <code>status: error</code> replies, since a failing cell can bind names before raising. Neither design says whether removed includes names removed by the same request's pre-run delete.</li>
+    <li>The dichotomy for rebound is not exhaustive: a weakref-where-possible hybrid bounds the memory cost, and instrumentation, which is what ipyflow actually does, detects rebinding exactly at CPU cost. Dropping rebound is a choice, not a necessity.</li>
+    <li>Dropping rebound blinds the two uses I gave the field. Cell A defines <code>x</code>; cell B runs <code>exec("x = 2")</code>; B's delta is empty because <code>x</code> already exists. On bash, <code>count=$((count+1))</code> produces an empty delta after the first run, and bash_kernel needs two extra pexpect round trips per cell to get even first definitions.</li>
+    <li>The notes' "ipyflow proves it works" is wrong in the other direction: ipyflow traces with pyccolo; it does not diff namespaces.</li>
+  </ul></div>
+  <p class="verdict"><b>Verdict</b>The shrink is defensible and additive; rebound can return as an optional key. The claims around it should be cut back: the field validates static analysis for new names only, and bash gets first definitions, not defines.</p>
+
+  <h3>3.6 Where analysis runs</h3>
+  <div class="duel">
+    <div class="side old"><p class="label">notes' design</p><p>Control channel, "like <code>debug_request</code>, which ipykernel services in a separate thread", because static analysis needs no namespace and should not queue behind a busy shell.</p></div>
+    <div class="side new"><p class="label">simplified design</p><p>Shell channel: same dispatch path as <code>complete</code> and <code>inspect</code>, no threading requirement on kernel authors, ordered with executions (a magic registered by an earlier cell changes how a later cell parses). Responsiveness during a long run from a subshell where the kernel has them.</p></div>
+  </div>
+  <div class="found"><p class="label">What the review found</p><ul>
+    <li>Norms. JEP 91 names completion, introspection, and variable inspection as things people put on control because it had its own thread, and says "this is considered bad practice as it should only be used for control purposes". Reviewers will quote it. The spec itself does not reserve control: it calls the channel "identical to Shell" on a separate socket, allows <code>kernel_info</code> there, and ipykernel accepts every shell message type on control. The notes' placement was against guidance, not against the spec.</li>
+    <li>Who is responsive today. A control thread exists in ipykernel and xeus-python. It does not in xeus-cpp or xeus-r, IRkernel, or in practice IJulia. Subshells exist in ipykernel 7 only; neither xeus nor xeus-zmq mentions them through their latest releases. On today's kernels the notes' route is responsive on a strict superset of kernels. The simplified design wins on direction and on what it asks of kernel authors, not on present capability.</li>
+    <li>Ordering. My IPython example was weak: <code>%%foo</code> and <code>%foo</code> rewrite textually whether or not the magic is registered; only single-line automagic and runtime-registered input transformers depend on live state. The requirement is real and strong elsewhere: Pluto expands macros in the live workspace module before resolving the topology, and a C++ cell cannot be parsed without the accumulated translation unit.</li>
+    <li>Ordering and responsiveness are mutually exclusive per request. A request sent to a subshell is ordered only within that subshell. The frontend picks per call, and the design should say so.</li>
+    <li>Thread safety does not discriminate. The single-line path enters <code>builtin_trap</code>, whose nesting counter is an unsynchronized read-modify-write shared with the executing thread. The hazard is identical for the control thread and a subshell thread, and ipykernel already runs <code>transform_cell</code> on subshell threads. The fix under either design is to call the static <code>input_transformer_manager.transform_cell()</code> and skip the prefilter.</li>
+    <li>An unknown message type on either channel gets no reply in ipykernel, and a message sent to a stale <code>subshell_id</code> is dropped with only a log line, so the frontend hangs rather than receiving the error JEP 91 promises.</li>
+    <li>Shell first is the reversible direction: <code>shutdown_request</code>'s move from shell to control took a deprecation cycle, and JEP 80 shows a message can later be allowed on both channels.</li>
+  </ul></div>
+  <p class="verdict"><b>Verdict</b>Shell, for the norms and the reversal path, with an explicit per-call policy and the honest statement that responsive analysis is ipykernel-only for now.</p>
+
+  <h3>3.7 The shape of the analysis reply</h3>
+  <div class="duel">
+    <div class="side old"><p class="label">notes' design</p><p>No schema. Per cell: <code>defines</code>, <code>references</code>, <code>imports</code>, <code>confidence</code>, <code>has_unknown_references</code>. Cell magics could declare their own inputs and outputs, as rpy2's <code>%%R -i x -o y</code> already says.</p></div>
+    <div class="side new"><p class="label">simplified design</p><pre><code>analyze_request  {"code": ["df = pd.read_csv(path)", "df.head("]}
+analyze_reply    {"status": "ok", "cells": [
+  {"status": "ok", "defines": ["df"],
+   "references": ["pd", "path"], "dynamic": false},
+  {"status": "error", "ename": "SyntaxError", "evalue": "..."}]}</code></pre></div>
+  </div>
+  <div class="found"><p class="label">What the review found</p><ul>
+    <li><code>code</code> as a list conflicts with every other request, where <code>code</code> is a string. A spec maintainer would reject the reuse of the name with a different type.</li>
+    <li>Folding imports into defines is right for Python, JavaScript and C++ and wrong for R and Julia: <code>library(dplyr)</code> and <code>using Foo</code> bind nothing enumerable at top level yet must be ancestors of every cell that uses an exported name. Pluto keeps <code>using</code> as a separate class for this reason. A drawn-graph UI also wants to hide import edges. The notes' <code>imports</code> list was load-bearing.</li>
+    <li>One <code>dynamic</code> flag forces the frontend to treat "may define names I cannot see" and "may reference names I cannot see" identically; a star-import cell and an NSE-heavy R cell should schedule differently.</li>
+    <li>The per-cell error entry is the right shape; a syntax error must not fail the batch.</li>
+    <li>Neither design defines <code>references</code>: free variables only or all names read; whether reads inside function bodies count (marimo and Observable count them); whether <code>obj.attr = 1</code> is a reference; whether <code>x += 1</code> is both.</li>
+    <li>Both designs' "transform_cell then ast or symtable" undercounts the analyzer. <code>transform_cell</code> turns every cell-magic body into a string literal; <code>%%capture out</code> defines <code>out</code>; <code>%%R -i x -o y</code> needs per-magic argument parsing with no registry API to declare it; <code>$var</code> in <code>!</code> and line magics expands at run time; <code>symtable</code> has no top-level-await flag; <code>del x</code> shows as an assignment. Measured cost is 2.5 ms per 200-line cell, so batching a notebook is fine.</li>
+  </ul></div>
+
+  <h3>3.8 Advertising and footprint</h3>
+  <p>JEP 92 explicitly allows a feature to be "additional messages and/or additional fields in different existing messages", so gating fields on strings is conformant, and JupyterLab already parses the list. Three strings for one message and two fields is a worse ratio than JEP 91 or the debugger; a reviewer accepts it only if each string has a testable contract. Neither design names its strings or versions them, and JEP 91 itself says a version specifier is probably needed.</p>
+  <p>On cost, the review's strongest point: cost scales with the semantics kernel authors must implement, not with message count.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Proposal</th><th>What it added</th><th>Opened</th><th>Merged</th><th>Shipped</th></tr></thead>
+    <tbody>
+      <tr><td>JEP 92, optional features</td><td>one optional field</td><td>January 2023</td><td>June 2023</td><td>ipykernel 7.3 advertises strings today</td></tr>
+      <tr><td>JEP 91, subshells</td><td>three control messages, a header field, new threading semantics</td><td>December 2022</td><td>September 2024</td><td>ipykernel 7.0 in October 2025; JupyterLab 4.4; no xeus implementation</td></tr>
+    </tbody>
+  </table></div>
+  <p>Scopes are in the JEP 91 class. <code>analyze_request</code> and <code>namespace_delete</code> are in the JEP 92 class. The simplified design's real saving is removing the one JEP 91 class item, not shaving message pairs.</p>
+</section>
+
+<section id="plugins">
+  <h2><span class="num">4</span>What each plugin can do under each design</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Behavior</th><th class="old">notes' design</th><th class="new">simplified design</th></tr></thead>
+    <tbody>
+      <tr><td>Graph of a cold notebook</td><td>one batch analyze; needs a running kernel</td><td>same</td></tr>
+      <tr><td>Rewire on edit without running</td><td>live during a long run on ipykernel and xeus-python</td><td>live during a long run on ipykernel via a subshell; queued elsewhere</td></tr>
+      <tr><td>Rerun descendants with partial failure</td><td><code>stop_on_error</code> is coarser than needed; scheduler blocks descendants itself</td><td>same, plus a failed cell has no bindings after delete-before-run</td></tr>
+      <tr><td>No hidden state on delete or rename</td><td>separate message; may delete only after success</td><td>field; delete happens before the run</td></tr>
+      <tr><td>Two branches defining <code>model</code></td><td>run both in their own scopes, concurrently on subshells (needs an IPython change to be real)</td><td>refuse, rename, serialize, or clone a kernel by replay</td></tr>
+      <tr><td>Parameter sweep over one subgraph</td><td>N scopes, N sets, results per scope</td><td>sequential in one namespace with generated assignment code, or N kernels</td></tr>
+      <tr><td>Input ports and parameters from the UI</td><td>one <code>set</code> message; kernel owns the JSON mapping</td><td>comms where a widget library exists; generated source elsewhere; translators live in the plugin</td></tr>
+      <tr><td>Concurrent independent branches</td><td>scopes on subshells</td><td>subshells with proven-disjoint defines; the GIL limits it to I/O-bound cells</td></tr>
+      <tr><td>Kernels without analysis (bash, cling)</td><td>manual edges; delta with rebound</td><td>manual edges; delta reports first definitions only</td></tr>
+      <tr><td>Reconcile analysis with what ran</td><td>rebound catches dynamic writes to existing names</td><td>catches new names only</td></tr>
+      <tr><td>Julia</td><td>delete via module bump</td><td>same; "Julia can advertise analysis without delete" framed a choice as a limit</td></tr>
+    </tbody>
+  </table></div>
+  <p>For the reactive plugin alone, the simplified design is sufficient and simpler. For the DAG plugin, it covers fan-out over disjoint names and defers genuine branching to a tier outside the kernel that is replay on a plain install.</p>
+</section>
+
+<section id="languages">
+  <h2><span class="num">5</span>Per-language feasibility</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Language, kernel</th><th>analysis</th><th>delete</th><th>delta</th><th>scopes (notes)</th><th>set (notes)</th></tr></thead>
+    <tbody>
+      <tr><td>Python, ipykernel</td><td>yes, with magic handling and a dynamic flag</td><td>yes; decide whether <code>Out</code> and <code>_</code> are scrubbed</td><td>yes, with the hidden-name filter</td><td>fresh module per scope; concurrency needs an IPython change</td><td>exact</td></tr>
+      <tr><td>R, IRkernel</td><td>yes; NSE makes many cells dynamic</td><td><code>rm</code> from globalenv; <code>library()</code> not undoable</td><td>yes if it also diffs the search path</td><td><code>new.env(parent=)</code>, the cleanest substrate</td><td>integer vs double, vector vs list vs data frame</td></tr>
+      <tr><td>Julia, IJulia</td><td>yes; macros expand in the live module, so order matters</td><td>only by module bump plus method-table surgery</td><td>added only; <code>using</code> invisible before 1.12</td><td>modules, but Pluto never forked them</td><td>Int64 vs Float64, Dict vs NamedTuple</td></tr>
+      <tr><td>JavaScript, Deno and ijavascript</td><td>yes for Deno (swc in-kernel)</td><td>no: <code>let</code> and <code>const</code> cannot be removed</td><td>needs <code>Runtime.globalLexicalScopeNames</code></td><td><code>vm.createContext</code>; the only route to delete</td><td>number precision, BigInt</td></tr>
+      <tr><td>bash</td><td>no</td><td><code>unset</code></td><td><code>compgen -v</code> diff, noisy, two extra round trips</td><td>none</td><td>strings only</td></tr>
+      <tr><td>C++, xeus-cpp</td><td>yes, order-dependent on the accumulated TU</td><td>no; clang-repl undo is LIFO and not exposed</td><td>new declarations per input</td><td>none</td><td>none</td></tr>
+      <tr><td>SQL</td><td>dialect-specific; SQLite's authorizer is exact</td><td><code>DROP</code>, which destroys data</td><td>catalog diff; not cheap on warehouses</td><td>none</td><td>none</td></tr>
+      <tr><td>JVM, JShell</td><td>defines only</td><td><code>drop(snippet)</code>, dependents re-marked</td><td>eval events, exact</td><td>none</td><td>typed</td></tr>
+    </tbody>
+  </table></div>
+  <p>Delete is exact in five of eight; set is exact in one. Factoring delete out of the notes' namespace-ops bundle is the single biggest agnosticism gain in the simplified design. Delta is more universally implementable than analysis, but it never yields references and must be normatively defined per language, or two kernels advertising the same string will disagree.</p>
+</section>
+
+<section id="both-wrong">
+  <h2><span class="num">6</span>What both designs got wrong</h2>
+  <ul>
+    <li>"<code>user_expressions</code> already covers get." IRkernel returns an empty list, bash_kernel and metakernel return <code>{}</code>, xeus-cpp ignores the argument. Get exists on ipykernel, xeus-python, and IJulia.</li>
+    <li>Neither says what delete scrubs. A plain <code>del user_ns[name]</code> leaves the object reachable through <code>Out[n]</code>, <code>_</code>, and <code>_N</code>.</li>
+    <li>Neither defines the delta's name set, its presence on error replies, its relation to the same request's delete, or its behavior under concurrent subshells.</li>
+    <li>Both treat <code>stop_on_error</code> as the partial-failure semantics a topological run needs. It aborts everything queued on the same subshell: over-aborting siblings when the scheduler pre-queues, doing nothing when cells go one at a time.</li>
+    <li>Both underestimate the analyzer and gesture at cell magics declaring their inputs and outputs without a mechanism.</li>
+    <li>Both misstate why snapshots would need messages: contract, not capability.</li>
+    <li>Both under-specify clone: "kernel rebinds ports" does not exist; "a REST change" hides the namespace requirement; neither mentions the restarter race or the parent poller.</li>
+    <li>Both misuse Pluto in opposite directions: as precedent for forkable scopes, which Pluto never had, and as "only for delete", when Pluto's delete is a module bump plus method deletion plus re-imports.</li>
+    <li>Both cite ipyflow for namespace diffing; it traces.</li>
+    <li>Both leave feature strings unnamed and unversioned, and both are silent on what a kernel that advertises delete does when a name cannot be removed.</li>
+    <li>Both assume analysis is order-free enough to run out of order somewhere. For IPython automagic, Julia macros, and C++ it is not.</li>
+    <li>Both describe <code>set</code> as the emulation route to value-carrying edges; real value edges need kernel-side handles for arbitrary objects.</li>
+  </ul>
+</section>
+
+<section id="gaps">
+  <h2><span class="num">7</span>Gaps neither design covers</h2>
+  <ul>
+    <li><b>The ordinary execution path.</b> Run Cell and Run All from the notebook view must go through the plugin or the ledger diverges from the kernel at once. JupyterLab 4 exposes a replaceable <code>INotebookCellExecutor</code> token and only one provider can hold it. Under the simplified design the replacement executor adds one field to the request it already sends; under the notes' design it sequences two futures.</li>
+    <li><b>Multiple clients on one kernel.</b> A console, a second tab, or a collaborator runs <code>x = 5</code> outside the ledger. Neither design has a kernel-side owner of "which cell defined this name". The ledger has to live in cell metadata in the shared model to be RTC-safe.</li>
+    <li><b>Ledger persistence.</b> Reload, kernel restart, and opening a notebook whose kernel is still running all need a reconciliation story.</li>
+    <li><b>Temporaries under the one-definition rule.</b> Ordinary notebooks reuse <code>i</code>, <code>df</code>, <code>fig</code>, <code>ax</code>, <code>tmp</code> across cells. marimo mangles underscore-prefixed names to cell-local names in the kernel; neither design has a way to express cell-private names. This will be the first complaint from any user of the reactive plugin.</li>
+    <li><b>The semantics of <code>references</code></b> and the policy for <code>dynamic</code> cells: run last, treat as defining everything downstream, refuse in reactive mode as marimo does for star imports, or warn. The value of dropping rebound depends on this policy.</li>
+    <li><b>Interrupt during a cascade.</b> The scheduler must reconcile ran, aborted before run, and, under the notes' message shape only, deleted but never ran.</li>
+    <li><b>Which second kernel proves agnosticism.</b> xeus-python drives an IPython <code>InteractiveShell</code>, so it shares the analyzer, the delete, the name filter, and the threading story with ipykernel. Deno, IRkernel, or IJulia each exercise a divergence the review found.</li>
+    <li><b>Effort accounting.</b> The simplified design moves work to the frontend: per-language literal generation for parameters, conflict refusal or serialization, clone orchestration against an endpoint that does not exist. The notes' design moves work the other way: scope lifecycle, re-forking children when the prefix reruns, a scope id on every read.</li>
+  </ul>
+</section>
+
+<section id="decisions">
+  <h2><span class="num">8</span>Decisions, with my recommendation</h2>
+  <ol class="decisions">
+    <li><b>May two branches of a user-drawn DAG define the same name?</b> The whole scopes debate reduces to this, and it is about the DAG plugin, not the reactive one. <span class="rec">Recommendation: no, for the first version.</span> Enforce one definition per name, flag conflicts from analysis, offer clone-by-replay for real branching later. If yes, the notes' scopes come back with a fresh-module implementation and an IPython change for concurrency.</li>
+    <li><b>Which plugin first.</b> <span class="rec">Reactive.</span> Its surface is analysis, delete, and delta, and every shipped reactive notebook runs on that surface.</li>
+    <li><b>Channel for analysis.</b> <span class="rec">Shell,</span> with a stated per-call policy: main shell when ordering matters, a subshell when the kernel has them and the user is waiting.</li>
+    <li><b>Delete as a field or a message.</b> <span class="rec">The field,</span> with the delete string advertised only when <code>do_execute</code> accepts the parameter, removed names echoed in the delta, and a <code>not_deleted</code> list on the reply.</li>
+    <li><b>Delete before run or on success.</b> <span class="rec">Before run,</span> marimo's semantics, with the scheduler recording names undefined because the run failed.</li>
+    <li><b>Rebound.</b> <span class="rec">Leave it out</span> of the first version and reserve it as an optional key; state that the delta validates new names only.</li>
+    <li><b>Set.</b> <span class="rec">Leave it out,</span> and say that inputs are authored as code cells or ipywidgets in the first version, so the loss is named rather than hidden.</li>
+    <li><b>Imports.</b> <span class="rec">Put the <code>imports</code> list back</span> as an optional key carrying module names. It is load-bearing for R and Julia and cheap.</li>
+    <li><b>One uncertainty flag or two.</b> <span class="rec">Two:</span> <code>unknown_defines</code> and <code>unknown_references</code>.</li>
+    <li><b>Feature strings.</b> <span class="rec">Three, named,</span> each with a testable contract written before ipykernel ships them.</li>
+    <li><b>The batch field.</b> <span class="rec">Do not reuse <code>code</code></span> for a list; use a differently named field.</li>
+    <li><b>Build versus propose.</b> <span class="rec">Build the simplified surface over a comm target;</span> let the pre-proposal name scopes and set as deferred with the reasons above, so the talk shows the small surface.</li>
+    <li><b>Second kernel.</b> <span class="rec">IRkernel or Deno</span> rather than xeus-python; either exercises a real divergence (no <code>user_expressions</code> and invisible <code>library()</code> in R; no delete for <code>let</code> in JavaScript).</li>
+  </ol>
+</section>
+
+<section id="conclusion">
+  <h2><span class="num">9</span>Conclusion</h2>
+  <div class="conclusion">
+    <p>The simplified design is the one to propose, for a reason stronger than its message count: it removes the only item that would be reviewed like subshells, and that item was unsound as written. Its two irreversible commitments, shell channel and delete as a field, are the ones with the cheaper reversal paths or the closable failure modes. Every other cut is additive later.</p>
+    <p>The notes' design remains the more complete statement of what the DAG plugin was started for. Same-name branches, in-process sweeps, and language-agnostic input ports are real capabilities the simplified design gives up, and the "server tier below" I pointed at is replay on any plain install. That trade is a product decision, and it should be made explicitly rather than inherited from a protocol footprint argument.</p>
+    <p>Several of my stated reasons were wrong even where the conclusion stands, and they should not appear in a proposal: the Hex precedent, the IPython magic example for ordering, "no threading requirement", "for free" on bash, "only needed for value edges", the papermill attribution, <code>copyToGlobals</code> as session-free, and <code>deletedCells</code> as a kernel-side precedent.</p>
+  </div>
+</section>
+
+<footer>
+  Sources: <code>.claude/artifacts/kernel-design-notes.md</code>, <code>.claude/artifacts/protocol-design-simplified.md</code>, and the full findings in <code>.claude/artifacts/protocol-design-comparison.md</code>. Versions checked: ipykernel 7.3.0, IPython 9.17.1, jupyter_client 8.10.0, JupyterLab 4.7.0a1 (source checkout at <code>~/git/jupyterlab/jupyterlab</code>), Python 3.14.6, node 26.7.0.
+</footer>
+</div>

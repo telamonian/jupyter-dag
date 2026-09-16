@@ -258,7 +258,7 @@ demos" (drop the comma; 1,196).
 language" in Benefits; align the optional bio sentence; otherwise done.
 
 **45. User (Sept 14):** Restart the project in Claude Code; export a transcript
-and relevant artifacts to `~/git/jupyter-day-2026/.claude`.
+and relevant artifacts to `.claude`.
 
 **Assistant:** Produced this directory: `CLAUDE.md`, `transcript.md`,
 `artifacts/` (proposal-final.md, description-final.md, genome-model.md,
