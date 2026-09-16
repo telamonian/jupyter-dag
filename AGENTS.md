@@ -244,10 +244,7 @@ export function registerCommands(app: JupyterFrontEnd): void {
 Then in `src/index.ts`:
 
 ```typescript
-import {
-  JupyterFrontEnd,
-  JupyterFrontEndPlugin
-} from '@jupyterlab/application';
+import { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
 import { registerCommands, CommandIDs, CommandArguments } from './commands';
 
 const plugin: JupyterFrontEndPlugin<void> = {
@@ -379,9 +376,7 @@ interface DataResponse {
   data: string;
 }
 
-export async function fetchData(
-  serverSettings: ServerConnection.ISettings
-): Promise<string> {
+export async function fetchData(serverSettings: ServerConnection.ISettings): Promise<string> {
   try {
     const response = await requestAPI<DataResponse>('data', serverSettings, {
       method: 'GET'
@@ -397,10 +392,7 @@ export async function fetchData(
       let detail = err.message;
 
       // Truncate HTML responses for cleaner error messages
-      if (
-        typeof detail === 'string' &&
-        (detail.includes('<!DOCTYPE') || detail.includes('<html'))
-      ) {
+      if (typeof detail === 'string' && (detail.includes('<!DOCTYPE') || detail.includes('<html'))) {
         detail = `HTML error page (${detail.substring(0, 100)}...)`;
       }
 
@@ -840,10 +832,12 @@ cells, no-code cells, Livebook smart cells, anywidget); notebooks in space
 
 Four traits of a Jupyter notebook; a descendant "changed a gene" only for a
 significant departure, not a reimplementation:
+
 - execution model (persistent namespace, user-ordered REPL)
 - file (list of typed cells with optional outputs)
 - cells (code + prose cells, one language, ordered list)
 - client (a human editing and running cells)
+
 Colab, VS Code, nteract, Jupytext, JupyterLite change none → distributions, not
 descendants. Full classification table in `artifacts/genome-model.md`; figure in
 `artifacts/family-tree-v3.svg`.
@@ -864,6 +858,7 @@ tone). All accepted descriptions are in
 Name is a working name only; do not present it as an existing project.
 Minimal kernel-protocol additions that serve both reactive execution and a
 user-drawn cell DAG (they differ only in where edges come from):
+
 1. `analyze_request` → per-cell defined/referenced names (kernel has the parser;
    optional feature; manual wiring is the fallback). Run on the control channel
    since it needs no namespace access. Optional `namespace_delta` on
@@ -873,13 +868,13 @@ user-drawn cell DAG (they differ only in where edges come from):
    get.
 3. forkable execution scopes (shallow namespace copy / env with parent):
    reactive-grade branch isolation; Pluto's module trick is the Julia version.
-Optional heavier tier: state snapshot/restore/clone (CRIU/DMTCP process-level via
-a jupyter_client provisioner; language-native serialization like dill/Kishu; replay
-as universal fallback). Advertise all via JEP 92 `supported_features`.
-Frontend: React Flow (`@xyflow/react`, MIT) in a JupyterLab ReactWidget on the
-same INotebookModel; Lumino CodeCell mounted inside custom nodes. The ComfyUI
-litegraph fork is not viable (internal module, GPL repo, canvas-rendered nodes).
-Details in `artifacts/kernel-design-notes.md`.
+   Optional heavier tier: state snapshot/restore/clone (CRIU/DMTCP process-level via
+   a jupyter_client provisioner; language-native serialization like dill/Kishu; replay
+   as universal fallback). Advertise all via JEP 92 `supported_features`.
+   Frontend: React Flow (`@xyflow/react`, MIT) in a JupyterLab ReactWidget on the
+   same INotebookModel; Lumino CodeCell mounted inside custom nodes. The ComfyUI
+   litegraph fork is not viable (internal module, GPL repo, canvas-rendered nodes).
+   Details in `artifacts/kernel-design-notes.md`.
 
 ## Writing rules Max enforces
 

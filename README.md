@@ -3,7 +3,6 @@
 [![Github Actions Status](https://github.com/telamonian/jupyter-dag/workflows/Build/badge.svg)](https://github.com/telamonian/jupyter-dag/actions/workflows/build.yml)
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/telamonian/jupyter-dag/main?urlpath=lab)
 
-
 Organize notebook cells into DAGs and run them reactively in JupyterLab
 
 This extension is composed of a Python package named `jupyter_dag`

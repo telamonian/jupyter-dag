@@ -1,7 +1,4 @@
-import {
-  JupyterFrontEnd,
-  JupyterFrontEndPlugin
-} from '@jupyterlab/application';
+import { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
 
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 
@@ -34,9 +31,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
         console.log(data);
       })
       .catch(reason => {
-        console.error(
-          `The jupyter_dag server extension appears to be missing.\n${reason}`
-        );
+        console.error(`The jupyter_dag server extension appears to be missing.\n${reason}`);
       });
   }
 };

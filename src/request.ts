@@ -24,11 +24,7 @@ export async function requestAPI<T>(
 
   let response: Response;
   try {
-    response = await ServerConnection.makeRequest(
-      requestUrl,
-      init,
-      serverSettings
-    );
+    response = await ServerConnection.makeRequest(requestUrl, init, serverSettings);
   } catch (error) {
     throw new ServerConnection.NetworkError(error as any);
   }
