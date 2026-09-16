@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/sync-transcript.py\"",
+            "timeout": 60,
+            "statusMessage": "Syncing .claude/transcript-code.md"
+          }
+        ]
+      }
+    ]
+  }
+}
