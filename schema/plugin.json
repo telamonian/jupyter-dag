@@ -1,0 +1,8 @@
+{
+  "jupyter.lab.shortcuts": [],
+  "title": "@telamonian/jupyter-dag",
+  "description": "@telamonian/jupyter-dag settings.",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

@@ -1,0 +1,19 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v4.6.5
+_src_path: https://github.com/jupyterlab/extension-template
+advanced: false
+author_email: telamonian@users.noreply.github.com
+author_name: Max Klein
+create_claude_symlink: false
+create_gemini_symlink: false
+has_ai_rules: true
+has_binder: true
+has_settings: true
+kind: frontend-and-server
+labextension_name: '@telamonian/jupyter-dag'
+project_short_description: Organize notebook cells into DAGs and run them reactively
+    in JupyterLab
+python_name: jupyter_dag
+repository: https://github.com/telamonian/jupyter-dag
+test: true
+
