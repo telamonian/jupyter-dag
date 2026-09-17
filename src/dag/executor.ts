@@ -1,31 +1,23 @@
 import { KernelError, NotebookActions, StaticNotebook } from '@jupyterlab/notebook';
-import type { INotebookCellExecutor, INotebookModel, Notebook } from '@jupyterlab/notebook';
+import type { INotebookCellExecutor, Notebook } from '@jupyterlab/notebook';
 import { CodeCell } from '@jupyterlab/cells';
 import type { Cell } from '@jupyterlab/cells';
 import { SessionContextDialogs } from '@jupyterlab/apputils';
 import type { ISessionContext } from '@jupyterlab/apputils';
 import { nullTranslator } from '@jupyterlab/translation';
 import type { ITranslator } from '@jupyterlab/translation';
-import { PromiseDelegate } from '@lumino/coreutils';
 import { Signal } from '@lumino/signaling';
-import type { ISignal } from '@lumino/signaling';
 import type { IDisposable } from '@lumino/disposable';
 import { downstreamOf, topologicalOrder, upstreamOf } from './wiring';
 import type { DagGraphModel } from './wiring';
 import { FEATURE_NAMESPACE_DELETE } from './protocol';
 import type { DagKernelClient, IAnalyzedCell } from './protocol';
-import type { DagNodeState } from './tokens';
 
 export interface IDagRunOptions {
   mode: 'all' | 'downstream' | 'upstream';
   roots?: string[];
   inclusive?: boolean;
   stopOnError?: boolean;
-}
-export interface IDagRunEvent {
-  cellId: string;
-  state: DagNodeState;
-  error?: KernelError;
 }
 
 /** Runs cells in wire order through the core cell executor, so each run has the toolbar's semantics. */
@@ -43,44 +35,29 @@ export class DagExecutor implements IDisposable {
     NotebookActions.selectionExecuted.connect(this._onSelectionExecuted, this);
     NotebookActions.outputCleared.connect(this._onOutputCleared, this);
   }
-  get stateChanged(): ISignal<this, IDagRunEvent> {
-    return this._stateChanged;
-  }
-  get running(): Promise<void> | null {
-    return this._running?.promise ?? null;
-  }
 
   async run(options: IDagRunOptions): Promise<boolean> {
+    const { mode, roots = [], inclusive = true, stopOnError = true } = options;
     const { cellIds, wires } = this._graph;
     let ids = cellIds;
-    if (options.mode === 'downstream') {
-      const s = downstreamOf(options.roots ?? [], wires, options.inclusive ?? true);
-      ids = cellIds.filter(id => s.has(id));
+    if (mode !== 'all') {
+      const closure = (mode === 'downstream' ? downstreamOf : upstreamOf)(roots, wires, inclusive);
+      ids = cellIds.filter(id => closure.has(id));
     }
-    if (options.mode === 'upstream') {
-      const s = upstreamOf(options.roots ?? [], wires, options.inclusive ?? true);
-      ids = cellIds.filter(id => s.has(id));
-    }
-    return this.runCells(topologicalOrder(ids, wires), options.stopOnError ?? true);
+    return this.runCells(topologicalOrder(ids, wires), stopOnError);
   }
 
   async runCells(order: string[], stopOnError = true): Promise<boolean> {
-    this._running = new PromiseDelegate<void>();
-    try {
-      await this._sessionContext.ready;
-      const remaining = new Set(order);
-      for (const cellId of order) {
-        remaining.delete(cellId);
-        const ok = await this._runOne(cellId, remaining);
-        if (!ok && stopOnError) {
-          return false;
-        }
+    await this._sessionContext.ready;
+    const remaining = new Set(order);
+    for (const cellId of order) {
+      remaining.delete(cellId);
+      const ok = await this._runOne(cellId, remaining);
+      if (!ok && stopOnError) {
+        return false;
       }
-      return true;
-    } finally {
-      this._running.resolve();
-      this._running = null;
     }
+    return true;
   }
 
   async analyzeAll(): Promise<Map<string, IAnalyzedCell>> {
@@ -102,26 +79,24 @@ export class DagExecutor implements IDisposable {
   private async _runOne(cellId: string, remaining: ReadonlySet<string>): Promise<boolean> {
     const cell = this._widgetFor(cellId);
     if (!cell) {
-      this._emit(cellId, 'error'); // no live widget for this cell (see DagPanel.cellWidget)
+      this._graph.setState(cellId, 'error'); // no live widget for this cell (see DagPanel.cellWidget)
       return false;
     }
     if (cell instanceof CodeCell && this._client.features.has(FEATURE_NAMESPACE_DELETE)) {
       this._purge(cellId); // shell is FIFO: the purge is processed before the execute that follows
     }
-    const notebook: INotebookModel = this._graph.notebook;
     const opts: INotebookCellExecutor.IRunCellOptions = {
       cell,
-      notebook, // the MODEL, despite the name
+      notebook: this._graph.notebook, // the MODEL, despite the name
       notebookConfig: StaticNotebook.defaultNotebookConfig,
-      onCellExecuted: ({ success, error }) => {
-        this._emit(cellId, success ? 'fresh' : 'error', error ?? undefined);
+      onCellExecuted: ({ success }) => {
+        this._graph.setState(cellId, success ? 'fresh' : 'error');
         if (success) {
           // NotebookActions.executed only fires for notebook-panel runs; mark dependents stale here too.
-          const downstream = downstreamOf([cellId], this._graph.wires, false);
-          this._graph.markStale([...downstream].filter(id => !remaining.has(id)));
+          this._markDownstreamStale(cellId, remaining);
         }
       },
-      onCellExecutionScheduled: () => this._emit(cellId, 'queued'),
+      onCellExecutionScheduled: () => this._graph.setState(cellId, 'queued'),
       sessionContext: this._sessionContext,
       sessionDialogs: this._sessionDialogs,
       translator: this._translator
@@ -130,14 +105,14 @@ export class DagExecutor implements IDisposable {
       return await this._cellExecutor.runCell(opts); // markdown and raw cells are handled by runCell itself
     } catch (e) {
       if (e instanceof KernelError) {
-        this._emit(cellId, 'error', e);
+        this._graph.setState(cellId, 'error');
         return false;
       }
       throw e;
     }
   }
 
-  /** 'purge without running': a silent execute of empty code carrying namespace_delete. */
+  /** Unbind what the cell defined last time, so a re-run starts from a namespace without its leftovers. */
   private _purge(cellId: string): void {
     const analyzed = this._lastAnalysis.get(cellId);
     const names = analyzed && analyzed.status !== 'error' ? analyzed.defined : [];
@@ -146,14 +121,19 @@ export class DagExecutor implements IDisposable {
     }
   }
 
+  /** Cells downstream of `cellId` are stale, except those about to run anyway. */
+  private _markDownstreamStale(cellId: string, except: ReadonlySet<string> = new Set()): void {
+    const downstream = downstreamOf([cellId], this._graph.wires, false);
+    this._graph.markStale([...downstream].filter(id => !except.has(id)));
+  }
+
   private _onExecuted(
     _: unknown,
     args: { notebook: Notebook; cell: Cell; success: boolean; error?: KernelError | null }
   ): void {
-    if (args.notebook.model !== this._graph.notebook || !args.success) {
-      return;
+    if (args.notebook.model === this._graph.notebook && args.success) {
+      this._markDownstreamStale(args.cell.model.id);
     }
-    this._graph.markStale(downstreamOf([args.cell.model.id], this._graph.wires, false));
   }
   private _onScheduled(_: unknown, args: { notebook: Notebook; cell: Cell }): void {
     if (args.notebook.model === this._graph.notebook) {
@@ -168,10 +148,6 @@ export class DagExecutor implements IDisposable {
     if (args.notebook.model === this._graph.notebook) {
       this._graph.markStale([args.cell.model.id]);
     }
-  }
-  private _emit(cellId: string, state: DagNodeState, error?: KernelError): void {
-    this._graph.setState(cellId, state);
-    this._stateChanged.emit({ cellId, state, error });
   }
 
   get isDisposed(): boolean {
@@ -192,8 +168,6 @@ export class DagExecutor implements IDisposable {
   private _translator: ITranslator;
   private _sessionDialogs: ISessionContext.IDialogs;
   private _lastAnalysis = new Map<string, IAnalyzedCell>();
-  private _stateChanged = new Signal<this, IDagRunEvent>(this);
-  private _running: PromiseDelegate<void> | null = null;
   private _isDisposed = false;
 }
 export namespace DagExecutor {

@@ -52,12 +52,12 @@ export function layoutElements<N extends Node, E extends Edge>(
   let sideY = 0;
   // dagre reports an empty graph's width as -Infinity (not null), so `??` is not enough here.
   const graphWidth = g.graph().width;
-  const sideX = (Number.isFinite(graphWidth) ? (graphWidth as number) : 0) + (options.ranksep ?? 48);
+  const sideX = (Number.isFinite(graphWidth) ? (graphWidth as number) : 0) + options.ranksep;
   return nodes.map(n => {
     if (!connected.has(n.id)) {
       // disconnected: stack in a side column (marimo layout.ts precedent)
       const position: XYPosition = { x: sideX, y: sideY };
-      sideY += sizeOf(n).height + (options.nodesep ?? 24);
+      sideY += sizeOf(n).height + options.nodesep;
       return { ...n, position, sourcePosition, targetPosition };
     }
     const nl: NodeLabel = g.node(n.id);

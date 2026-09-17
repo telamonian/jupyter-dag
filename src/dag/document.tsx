@@ -6,18 +6,13 @@ import type { ISessionContext } from '@jupyterlab/apputils';
 import { LabIcon, ReactWidget } from '@jupyterlab/ui-components';
 import type { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import type { IEditorMimeTypeService } from '@jupyterlab/codeeditor';
-import { Cell } from '@jupyterlab/cells';
-import type { OutputArea } from '@jupyterlab/outputarea';
+import type { Cell } from '@jupyterlab/cells';
 import type { KernelMessage } from '@jupyterlab/services';
 import { nullTranslator } from '@jupyterlab/translation';
 import type { ITranslator } from '@jupyterlab/translation';
-import type { Message } from '@lumino/messaging';
-import { PromiseDelegate } from '@lumino/coreutils';
 import { Signal } from '@lumino/signaling';
-import type { ReactFlowInstance } from '@xyflow/react';
 import { DagCanvas } from './canvas';
-import type { DagEdge } from './canvas';
-import type { CellNode, ICellNodeContext } from './cellnode';
+import type { ICellNodeContext } from './cellnode';
 import { DagGraphModel } from './wiring';
 import { DagExecutor } from './executor';
 import { DagKernelClient } from './protocol';
@@ -54,50 +49,46 @@ export class DagPanel extends ReactWidget {
       rendermime: options.rendermime,
       translator: options.translator ?? nullTranslator,
       findCell: id => this.graph.findCell(id),
-      registerWidget: (id, w) => {
-        if (w) {
-          this._widgets.set(id, w);
+      registerWidget: (id, cell) => {
+        if (cell) {
+          this._widgets.set(id, cell);
         } else {
           this._widgets.delete(id);
         }
       },
       onRunDownstream: id => void this.executor.run({ mode: 'downstream', roots: [id] })
     };
+    // The client re-detects on kernel start, change and restart; analysis follows every detection.
+    this.client.featuresChanged.connect(this._analyze, this);
     this.context.sessionContext.kernelChanged.connect(this._updateMimeTypes, this);
-    // On layout restore the widget exists before the notebook has loaded: mount the canvas only once
-    // the model is populated, so React Flow never sees an empty graph (its bounds would be infinite).
-    void this.context.ready.then(() => {
-      this._loaded = true;
-      this.update();
-    });
+    // A kernel may already be running (a DAG view opened next to its notebook panel).
+    void this.client.detectFeatures();
+    void this._updateMimeTypes();
+    // On layout restore the panel is attached (under the document spinner) before the notebook has loaded:
+    // mount the canvas only once the model is populated, so React Flow never sees an empty graph.
+    void this.context.ready.then(() => this.update());
   }
   readonly context: DocumentRegistry.IContext<INotebookModel>;
   readonly settings: IDagSettings;
   readonly graph: DagGraphModel;
   readonly client: DagKernelClient;
   readonly executor: DagExecutor;
-  get ready(): Promise<void> {
-    return this._ready.promise;
-  }
-  get flow(): ReactFlowInstance<CellNode, DagEdge> | null {
-    return this._flow;
-  }
   /** Re-run auto-layout on the canvas (toolbar button / command). */
   autoLayout(): void {
     this._layoutRequested.emit();
   }
   /** The live cell widget to execute: this view's, or the notebook panel's on the same context. */
   cellWidget(cellId: string): Cell | undefined {
-    const w = this._widgets.get(cellId);
-    if (w instanceof Cell) {
-      return w;
+    const own = this._widgets.get(cellId);
+    if (own) {
+      return own;
     }
     const panel = this._notebookTracker.find(p => p.context === this.context);
     return panel?.content.widgets.find(c => c.model.id === cellId);
   }
   protected render(): JSX.Element {
-    if (!this._loaded) {
-      return <div className="jp-DagPanel-loading" />;
+    if (!this.context.isReady) {
+      return <div />;
     }
     return (
       <DagCanvas
@@ -105,20 +96,11 @@ export class DagPanel extends ReactWidget {
         nodeContext={this._nodeContext}
         settings={this.settings}
         layoutRequested={this._layoutRequested}
-        onInit={inst => {
-          this._flow = inst;
-          this._ready.resolve();
-        }}
       />
     );
   }
-  protected onAfterAttach(msg: Message): void {
-    super.onAfterAttach(msg);
-    void this.context.ready
-      .then(() => this.client.detectFeatures())
-      .then(() => this.executor.analyzeAll())
-      .catch(reason => console.error('jupyter-dag: analysis failed', reason));
-    void this._updateMimeTypes();
+  private _analyze(): void {
+    this.executor.analyzeAll().catch(reason => console.error('jupyter-dag: analysis failed', reason));
   }
   private async _updateMimeTypes(): Promise<void> {
     // StaticNotebook does this in _onKernelChanged (widget.ts:703)
@@ -144,17 +126,13 @@ export class DagPanel extends ReactWidget {
     this.executor.dispose();
     this.client.dispose();
     this.graph.dispose();
-    Signal.clearData(this);
-    super.dispose();
+    super.dispose(); // Widget.dispose clears this widget's signal connections
   }
   private _nodeContext: ICellNodeContext;
   private _mimeTypeService: IEditorMimeTypeService;
   private _notebookTracker: INotebookTracker;
-  private _widgets = new Map<string, Cell | OutputArea>();
-  private _flow: ReactFlowInstance<CellNode, DagEdge> | null = null;
-  private _ready = new PromiseDelegate<void>();
+  private _widgets = new Map<string, Cell>();
   private _layoutRequested = new Signal<this, void>(this);
-  private _loaded = false;
 }
 export namespace DagPanel {
   export interface IOptions {

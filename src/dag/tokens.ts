@@ -22,23 +22,18 @@ export namespace CommandIDs {
   export const autoLayout = 'jupyter-dag:auto-layout';
 }
 
-/** User settings declared in schema/plugin.json under PLUGIN_ID. */
+/** User settings declared in schema/plugin.json under PLUGIN_ID; the schema supplies the defaults. */
 export interface IDagSettings {
   layoutDirection: 'TB' | 'LR';
   maxZoom: number;
   outputOnlyNodes: boolean;
   analyzeChannel: 'shell' | 'control';
 }
-export const DEFAULT_SETTINGS: IDagSettings = {
-  layoutDirection: 'TB',
-  maxZoom: 1,
-  outputOnlyNodes: false,
-  analyzeChannel: 'shell'
-};
+/** Narrow the settings registry's composite (JSON) to IDagSettings. */
 export function readSettings(composite: ReadonlyPartialJSONObject): IDagSettings {
   return {
     layoutDirection: composite.layoutDirection === 'LR' ? 'LR' : 'TB',
-    maxZoom: typeof composite.maxZoom === 'number' ? composite.maxZoom : DEFAULT_SETTINGS.maxZoom,
+    maxZoom: typeof composite.maxZoom === 'number' ? composite.maxZoom : 1,
     outputOnlyNodes: composite.outputOnlyNodes === true,
     analyzeChannel: composite.analyzeChannel === 'control' ? 'control' : 'shell'
   };
@@ -63,8 +58,9 @@ export interface IWire {
   target: string;
 }
 export type DagNodeState = 'fresh' | 'stale' | 'queued' | 'running' | 'error';
+/** What changed: the cell list, the wires, or the per-node execution state of `cellIds`. */
 export interface IDagGraphChange {
-  type: 'edges' | 'nodes' | 'layout' | 'state';
+  type: 'nodes' | 'edges' | 'state';
   cellIds?: string[];
 }
 

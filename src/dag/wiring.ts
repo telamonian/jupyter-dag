@@ -29,6 +29,9 @@ export function getCellMetadata(cell: ICellModel): IDagCellMetadata {
 export function setCellMetadata(cell: ICellModel, value: IDagCellMetadata): void {
   cell.setMetadata(METADATA_KEY, value); // ydoc skips deep-equal values; never pass undefined (it deletes the key)
 }
+export function updateCellMetadata(cell: ICellModel, patch: Partial<IDagCellMetadata>): void {
+  setCellMetadata(cell, { ...getCellMetadata(cell), ...patch });
+}
 export function getNotebookMetadata(model: INotebookModel): IDagNotebookMetadata {
   return (model.getMetadata(METADATA_KEY) as IDagNotebookMetadata | undefined) ?? { version: 1 };
 }
@@ -48,34 +51,45 @@ export function collectWires(model: INotebookModel): IWire[] {
   }
   return wires;
 }
-export function addWire(model: INotebookModel, source: string, target: string): IWire | null {
-  const cell = find(model.cells, c => c.id === target);
-  if (!cell || source === target || wouldCreateCycle(collectWires(model), source, target)) {
+export function addWire(graph: DagGraphModel, source: string, target: string): IWire | null {
+  const cell = graph.findCell(target);
+  if (!cell || wouldCreateCycle(graph.wires, source, target)) {
     return null;
   }
-  const meta = getCellMetadata(cell);
-  setCellMetadata(cell, { ...meta, inputs: [...new Set([...meta.inputs, source])] });
+  const { inputs } = getCellMetadata(cell);
+  updateCellMetadata(cell, { inputs: [...new Set([...inputs, source])] });
   return { id: wireId(source, target), source, target };
 }
-export function removeWire(model: INotebookModel, source: string, target: string): void {
-  const cell = find(model.cells, c => c.id === target);
-  if (!cell) {
-    return;
+export function removeWire(graph: DagGraphModel, source: string, target: string): void {
+  const cell = graph.findCell(target);
+  if (cell) {
+    updateCellMetadata(cell, { inputs: getCellMetadata(cell).inputs.filter(id => id !== source) });
   }
-  const meta = getCellMetadata(cell);
-  setCellMetadata(cell, { ...meta, inputs: meta.inputs.filter(id => id !== source) });
 }
 
+/** Adjacency list: source id -> target ids. */
+function successors(wires: IWire[]): Map<string, string[]> {
+  const next = new Map<string, string[]>();
+  for (const w of wires) {
+    const targets = next.get(w.source);
+    if (targets) {
+      targets.push(w.target);
+    } else {
+      next.set(w.source, [w.target]);
+    }
+  }
+  return next;
+}
 export function downstreamOf(start: Iterable<string>, wires: IWire[], inclusive: boolean): Set<string> {
+  const next = successors(wires);
   const out = new Set<string>();
   const stack = [...start];
   const seeds = new Set(stack);
   while (stack.length) {
-    const id = stack.pop()!;
-    for (const w of wires) {
-      if (w.source === id && !out.has(w.target)) {
-        out.add(w.target);
-        stack.push(w.target);
+    for (const target of next.get(stack.pop()!) ?? []) {
+      if (!out.has(target)) {
+        out.add(target);
+        stack.push(target);
       }
     }
   }
@@ -93,13 +107,17 @@ export function upstreamOf(start: Iterable<string>, wires: IWire[], inclusive: b
 export function wouldCreateCycle(wires: IWire[], source: string, target: string): boolean {
   return source === target || downstreamOf([target], wires, true).has(source);
 }
-/** Kahn's algorithm; ties broken by `cellIds` order (document order). */
+/**
+ * Kahn's algorithm; ties broken by `cellIds` order (document order). @lumino/algorithm's topologicSort
+ * is not used because it drops cells that have no wires and has no tie-break.
+ */
 export function topologicalOrder(cellIds: string[], wires: IWire[]): string[] {
-  const ids = new Set(cellIds);
+  const rank = new Map<string, number>(cellIds.map((id, i) => [id, i]));
+  const next = successors(wires.filter(w => rank.has(w.source) && rank.has(w.target)));
   const indeg = new Map<string, number>(cellIds.map(id => [id, 0]));
-  for (const w of wires) {
-    if (ids.has(w.source) && ids.has(w.target)) {
-      indeg.set(w.target, (indeg.get(w.target) ?? 0) + 1);
+  for (const targets of next.values()) {
+    for (const t of targets) {
+      indeg.set(t, indeg.get(t)! + 1);
     }
   }
   const out: string[] = [];
@@ -107,17 +125,14 @@ export function topologicalOrder(cellIds: string[], wires: IWire[]): string[] {
   while (ready.length) {
     const id = ready.shift()!;
     out.push(id);
-    for (const w of wires) {
-      if (w.source !== id || !ids.has(w.target)) {
-        continue;
-      }
-      const d = (indeg.get(w.target) ?? 1) - 1;
-      indeg.set(w.target, d);
+    for (const t of next.get(id) ?? []) {
+      const d = indeg.get(t)! - 1;
+      indeg.set(t, d);
       if (d === 0) {
-        ready.push(w.target);
-        ready.sort((a, b) => cellIds.indexOf(a) - cellIds.indexOf(b));
+        ready.push(t);
       }
     }
+    ready.sort((a, b) => rank.get(a)! - rank.get(b)!);
   }
   return out;
 }
@@ -131,7 +146,6 @@ export class DagGraphModel implements IDagGraphModel, IDisposable {
   constructor(notebook: INotebookModel) {
     this.notebook = notebook;
     notebook.cells.changed.connect(this._onCellsChanged, this);
-    notebook.metadataChanged.connect(this._onNotebookMetadataChanged, this);
     for (const cell of notebook.cells) {
       this._track(cell);
     }
@@ -146,11 +160,12 @@ export class DagGraphModel implements IDagGraphModel, IDisposable {
   get cellIds(): string[] {
     return Array.from(this.notebook.cells, c => c.id);
   }
+  /** Cached: the canvas reads this on every pointer move while a wire is being dragged. */
   get wires(): IWire[] {
-    return collectWires(this.notebook);
+    return (this._wires ??= collectWires(this.notebook));
   }
   findCell(id: string): ICellModel | undefined {
-    return this._cells.get(id);
+    return find(this.notebook.cells, c => c.id === id);
   }
   stateOf(cellId: string): DagNodeState {
     return this._state.get(cellId) ?? 'fresh';
@@ -172,41 +187,32 @@ export class DagGraphModel implements IDagGraphModel, IDisposable {
     }
   }
   private _track(cell: ICellModel): void {
-    this._cells.set(cell.id, cell);
     cell.metadataChanged.connect(this._onCellMetadataChanged, this);
     cell.sharedModel.changed.connect(this._onSharedCellChanged, this);
   }
   private _onCellsChanged(_: CellList, args: IObservableList.IChangedArgs<ICellModel>): void {
-    // CellList reports removals with `oldValues` full of undefined (the models are already disposed),
-    // so reconcile against the live list instead of the change args.
-    const live = new Set(this.cellIds);
-    for (const id of [...this._cells.keys()]) {
-      if (!live.has(id)) {
-        this._cells.delete(id);
-      }
-    }
+    // Removed cells are disposed by CellList, which also drops their signal connections.
     args.newValues.forEach(c => this._track(c));
+    this._wires = null;
     this._changed.emit({ type: 'nodes' });
   }
   private _onCellMetadataChanged(cell: ICellModel, change: IMapChange): void {
     if (change.key !== METADATA_KEY) {
       return;
     }
-    // Position and size writes share the key with the wires; only report an edge change when inputs differ.
+    // Position and size writes share the key with the wires; only a change to `inputs` is a graph change.
     const before = readCellMetadata(change.oldValue as ReadonlyPartialJSONObject | undefined).inputs;
     const after = readCellMetadata(change.newValue as ReadonlyPartialJSONObject | undefined).inputs;
-    const same = before.length === after.length && before.every((id, i) => id === after[i]);
-    this._changed.emit({ type: same ? 'layout' : 'edges', cellIds: [cell.id] });
+    if (before.length === after.length && before.every((id, i) => id === after[i])) {
+      return;
+    }
+    this._wires = null;
+    this._changed.emit({ type: 'edges', cellIds: [cell.id] });
   }
   private _onSharedCellChanged(sender: ISharedCell, change: CellChange): void {
     if (change.sourceChange) {
       this.markStale([sender.getId()]);
     } // NOT contentChanged: that fires on output writes too
-  }
-  private _onNotebookMetadataChanged(_: INotebookModel, change: IMapChange): void {
-    if (change.key === METADATA_KEY) {
-      this._changed.emit({ type: 'layout' });
-    }
   }
   dispose(): void {
     if (this._isDisposed) {
@@ -216,7 +222,7 @@ export class DagGraphModel implements IDagGraphModel, IDisposable {
     Signal.clearData(this);
   }
   private _changed = new Signal<this, IDagGraphChange>(this);
-  private _cells = new Map<string, ICellModel>();
   private _state = new Map<string, DagNodeState>();
+  private _wires: IWire[] | null = null;
   private _isDisposed = false;
 }

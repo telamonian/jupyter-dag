@@ -19,7 +19,6 @@ import { DagDocument, DagWidgetFactory, dagIcon } from './document';
 import { DagGraphModel } from './wiring';
 import {
   CommandIDs,
-  DEFAULT_SETTINGS,
   FACTORY_NAME,
   IDagGraphModelFactory,
   IDagTracker,
@@ -29,7 +28,6 @@ import {
   readSettings
 } from './tokens';
 import type { IDagRunOptions } from './executor';
-import type { IDagSettings } from './tokens';
 
 /**
  * The DAG view. Takes the template's plugin id so schema/plugin.json binds to it: the notebook
@@ -46,11 +44,12 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
     IEditorServices,
     NotebookPanel.IContentFactory,
     INotebookCellExecutor,
-    ISettingRegistry
+    ISettingRegistry,
+    IToolbarWidgetRegistry
   ],
-  optional: [ILayoutRestorer, ICommandPalette, IToolbarWidgetRegistry, ISessionContextDialogs, ITranslator],
+  optional: [ILayoutRestorer, ICommandPalette, ISessionContextDialogs, ITranslator],
   provides: IDagTracker,
-  activate: (
+  activate: async (
     app: JupyterFrontEnd,
     notebookTracker: INotebookTracker,
     docManager: IDocumentManager,
@@ -59,26 +58,19 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
     contentFactory: NotebookPanel.IContentFactory,
     cellExecutor: INotebookCellExecutor,
     settingRegistry: ISettingRegistry,
+    toolbarRegistry: IToolbarWidgetRegistry,
     restorer: ILayoutRestorer | null,
     palette: ICommandPalette | null,
-    toolbarRegistry: IToolbarWidgetRegistry | null,
     sessionDialogs: ISessionContextDialogs | null,
     translator_: ITranslator | null
-  ): IDagTracker => {
+  ): Promise<IDagTracker> => {
     const translator = translator_ ?? nullTranslator;
-    const trans = translator.load('jupyterlab');
+    const trans = translator.load('jupyter-dag'); // this extension's own translation domain
     const tracker = new WidgetTracker<DagDocument>({ namespace: TRACKER_NAMESPACE });
-
-    let settings: IDagSettings = DEFAULT_SETTINGS;
-    settingRegistry
-      .load(PLUGIN_ID)
-      .then(loaded => {
-        settings = readSettings(loaded.composite);
-        loaded.changed.connect(() => {
-          settings = readSettings(loaded.composite);
-        });
-      })
-      .catch(reason => console.error(`Failed to load settings for ${PLUGIN_ID}.`, reason));
+    // The schema declares `jupyter.lab.transform`, so the settings cannot load until the toolbar
+    // factory has registered its transformer: create it first.
+    const toolbarFactory = createToolbarFactory(toolbarRegistry, settingRegistry, FACTORY_NAME, PLUGIN_ID, translator);
+    const settings = await settingRegistry.load(PLUGIN_ID); // schema defaults fill `composite`
 
     const factory = new DagWidgetFactory({
       name: FACTORY_NAME,
@@ -86,16 +78,14 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
       fileTypes: ['notebook'],
       preferKernel: true,
       canStartKernel: true,
-      toolbarFactory: toolbarRegistry
-        ? createToolbarFactory(toolbarRegistry, settingRegistry, FACTORY_NAME, PLUGIN_ID, translator)
-        : undefined,
+      toolbarFactory,
       translator,
       rendermime,
       contentFactory,
       mimeTypeService: editorServices.mimeTypeService,
       cellExecutor,
       notebookTracker,
-      settings: () => settings,
+      settings: () => readSettings(settings.composite),
       sessionDialogs: sessionDialogs ?? undefined
     });
     factory.widgetCreated.connect((_, widget) => {

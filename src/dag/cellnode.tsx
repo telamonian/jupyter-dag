@@ -1,7 +1,8 @@
 import React, { memo, useContext, useLayoutEffect, useRef } from 'react';
 import { Handle, NodeResizer, NodeToolbar, Position } from '@xyflow/react';
 import type { HandleProps, Node, NodeProps, NodeTypes } from '@xyflow/react';
-import type { Cell, ICellModel, ICodeCellModel, IMarkdownCellModel, IRawCellModel } from '@jupyterlab/cells';
+import { Cell } from '@jupyterlab/cells';
+import type { ICellModel, ICodeCellModel, IMarkdownCellModel, IRawCellModel } from '@jupyterlab/cells';
 import { StaticNotebook } from '@jupyterlab/notebook';
 import type { NotebookPanel } from '@jupyterlab/notebook';
 import { SimplifiedOutputArea } from '@jupyterlab/outputarea';
@@ -27,7 +28,8 @@ export interface ICellNodeContext {
   rendermime: IRenderMimeRegistry;
   translator: ITranslator;
   findCell(id: string): ICellModel | undefined;
-  registerWidget(id: string, widget: Cell | OutputArea | null): void;
+  /** Only Cell widgets are executable; output-only nodes are not registered. */
+  registerWidget(id: string, cell: Cell | null): void;
   onRunDownstream(id: string): void;
 }
 export const CellNodeContext = React.createContext<ICellNodeContext | null>(null);
@@ -91,8 +93,11 @@ function CellNodeView({ data, selected }: NodeProps<CellNode>): JSX.Element {
         : createCellWidget(ctx, model);
     Widget.attach(widget, host);
     MessageLoop.sendMessage(widget, Widget.ResizeMessage.UnknownSize); // no Lumino parent: pump resize ourselves
-    ctx.registerWidget(data.cellId, widget);
-    const ro = new ResizeObserver(() => MessageLoop.sendMessage(widget, Widget.ResizeMessage.UnknownSize));
+    if (widget instanceof Cell) {
+      ctx.registerWidget(data.cellId, widget);
+    }
+    // Posted, not sent: the editor relayout then happens outside the observer callback and repeats coalesce.
+    const ro = new ResizeObserver(() => MessageLoop.postMessage(widget, Widget.ResizeMessage.UnknownSize));
     ro.observe(host);
     return () => {
       ro.disconnect();

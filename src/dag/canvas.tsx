@@ -31,13 +31,11 @@ import type {
   FitViewOptions,
   IsValidConnection,
   NodeChange,
-  OnBeforeDelete,
   OnConnect,
   OnConnectEnd,
   OnEdgesChange,
   OnNodesChange,
   OnSelectionChangeFunc,
-  ReactFlowInstance,
   Viewport
 } from '@xyflow/react';
 import type { ISignal } from '@lumino/signaling';
@@ -50,12 +48,12 @@ import {
   getCellMetadata,
   getNotebookMetadata,
   removeWire,
-  setCellMetadata,
   setNotebookMetadata,
+  updateCellMetadata,
   wouldCreateCycle
 } from './wiring';
 import type { DagGraphModel } from './wiring';
-import type { IDagGraphChange, IDagSettings, IWire } from './tokens';
+import type { IDagCellMetadata, IDagSettings, IWire } from './tokens';
 
 /** `names` is where analyze results (the variables carried by a wire) will be shown. */
 export type DagEdgeData = { names?: string[] };
@@ -126,12 +124,26 @@ export function buildNodes(graph: DagGraphModel, outputOnly: boolean): CellNode[
       position: meta.position ?? { x: 0, y: index * 160 },
       width: meta.width,
       height: meta.height,
+      deletable: false, // cells are deleted in the notebook, never from the canvas; the cell list drives 'nodes'
       data
     };
   });
 }
 export function buildEdges(graph: DagGraphModel): DagEdge[] {
   return graph.wires.map(wireToEdge);
+}
+function sameData(a: CellNodeData, b: CellNodeData): boolean {
+  return (Object.keys(b) as (keyof CellNodeData)[]).every(k => a[k] === b[k]);
+}
+
+/** Connect a Lumino signal for the lifetime of the component (or until `slot` changes). */
+function useLuminoSignal<T, U>(signal: ISignal<T, U>, slot: (sender: T, args: U) => void): void {
+  useEffect(() => {
+    signal.connect(slot);
+    return () => {
+      signal.disconnect(slot);
+    };
+  }, [signal, slot]);
 }
 
 export interface IDagCanvasProps {
@@ -140,10 +152,9 @@ export interface IDagCanvasProps {
   settings: IDagSettings;
   /** Emitted by the document (toolbar / command) to run auto-layout. */
   layoutRequested: ISignal<unknown, void>;
-  onInit: (instance: ReactFlowInstance<CellNode, DagEdge>) => void;
 }
 
-function DagFlow({ graph, settings, layoutRequested, onInit }: IDagCanvasProps): JSX.Element {
+function DagFlow({ graph, settings, layoutRequested }: IDagCanvasProps): JSX.Element {
   const model = graph.notebook;
   const outputOnly = settings.outputOnlyNodes;
   const [nodes, setNodes] = useState<CellNode[]>(() => buildNodes(graph, outputOnly));
@@ -156,118 +167,85 @@ function DagFlow({ graph, settings, layoutRequested, onInit }: IDagCanvasProps):
   const hasSize = useStore(s => s.width > 0 && s.height > 0);
   const instance = useReactFlow<CellNode, DagEdge>();
 
-  useEffect(() => {
-    const refresh = (_: unknown, change: IDagGraphChange) => {
-      switch (change.type) {
-        case 'state': {
-          // Patch in place so React Flow keeps node identities, positions and measurements.
-          const ids = new Set(change.cellIds ?? []);
-          setNodes(current =>
-            current.map(n => (ids.has(n.id) ? { ...n, data: { ...n.data, state: graph.stateOf(n.id) } } : n))
-          );
-          break;
+  // Rebuild from the model on any change, keeping the previous node and edge objects wherever nothing
+  // in them changed: React Flow then keeps identities, positions, measurements and selection.
+  const refresh = useCallback(() => {
+    setNodes(current => {
+      const previous = new Map(current.map(n => [n.id, n]));
+      return buildNodes(graph, outputOnly).map(n => {
+        const p = previous.get(n.id);
+        if (!p) {
+          return n;
         }
-        case 'edges':
-          setEdges(buildEdges(graph));
-          break;
-        case 'nodes': {
-          setNodes(current => {
-            const previous = new Map(current.map(n => [n.id, n]));
-            return buildNodes(graph, outputOnly).map(n => {
-              const p = previous.get(n.id);
-              return p ? { ...p, data: n.data } : n;
-            });
-          });
-          setEdges(buildEdges(graph));
-          break;
-        }
-        case 'layout':
-          break;
-      }
-    };
-    graph.changed.connect(refresh);
-    return () => {
-      graph.changed.disconnect(refresh);
-    };
+        return sameData(p.data, n.data) ? p : { ...p, data: n.data };
+      });
+    });
+    setEdges(current => {
+      const previous = new Map(current.map(e => [e.id, e]));
+      return buildEdges(graph).map(e => previous.get(e.id) ?? e);
+    });
   }, [graph, outputOnly]);
+  useLuminoSignal(graph.changed, refresh);
 
+  const persist = useCallback(
+    (cellId: string, patch: Partial<IDagCellMetadata>) => {
+      const cell = graph.findCell(cellId);
+      if (cell) {
+        updateCellMetadata(cell, patch);
+      }
+    },
+    [graph]
+  );
   const onLayout = useCallback(
     (dir: LayoutDirection) => {
       setDirection(dir);
-      const laid = layoutElements(nodes, edges, { direction: dir });
+      const laid = layoutElements(instance.getNodes(), instance.getEdges(), { direction: dir });
       setNodes(laid);
       // Persist the computed positions (drag-end is the only other writer), as one undoable transaction.
       model.sharedModel.transact(() => {
         setNotebookMetadata(model, { ...getNotebookMetadata(model), direction: dir });
         for (const n of laid) {
-          const cell = graph.findCell(n.id);
-          if (cell) {
-            setCellMetadata(cell, { ...getCellMetadata(cell), position: n.position });
-          }
+          persist(n.id, { position: n.position });
         }
       }, true);
       if (hasSize) {
         void instance.fitView(fitViewOptions);
       }
     },
-    [nodes, edges, graph, hasSize, instance, model]
+    [hasSize, instance, model, persist]
   );
   useEffect(() => {
     if (initialized && hasSize && !getNotebookMetadata(model).viewport) {
       onLayout(direction);
     }
   }, [initialized, hasSize]);
-  useEffect(() => {
-    const handler = () => onLayout(direction);
-    layoutRequested.connect(handler);
-    return () => {
-      layoutRequested.disconnect(handler);
-    };
-  }, [layoutRequested, onLayout, direction]);
+  const onLayoutRequested = useCallback(() => onLayout(direction), [onLayout, direction]);
+  useLuminoSignal(layoutRequested, onLayoutRequested);
 
   const onNodesChange: OnNodesChange<CellNode> = useCallback(
     (changes: NodeChange<CellNode>[]) => {
-      // Nodes are never removed from the canvas directly; the cell list drives that through 'nodes' events.
-      setNodes(current =>
-        applyNodeChanges(
-          changes.filter(c => c.type !== 'remove'),
-          current
-        )
-      );
+      setNodes(current => applyNodeChanges(changes, current));
       for (const change of changes) {
         if (change.type === 'position' && change.position && !change.dragging) {
-          const cell = graph.findCell(change.id);
-          if (cell) {
-            setCellMetadata(cell, { ...getCellMetadata(cell), position: change.position });
-          }
-        }
-        if (change.type === 'dimensions' && change.dimensions && change.resizing === false) {
-          const cell = graph.findCell(change.id);
-          if (cell) {
-            setCellMetadata(cell, {
-              ...getCellMetadata(cell),
-              width: change.dimensions.width,
-              height: change.dimensions.height
-            });
-          }
+          persist(change.id, { position: change.position });
+        } else if (change.type === 'dimensions' && change.dimensions && change.resizing === false) {
+          persist(change.id, { width: change.dimensions.width, height: change.dimensions.height });
         }
       }
     },
-    [graph]
+    [persist]
   );
   const onEdgesChange: OnEdgesChange<DagEdge> = useCallback(
     (changes: EdgeChange<DagEdge>[]) => {
       setEdges(current => applyEdgeChanges(changes, current));
       for (const change of changes) {
-        if (change.type === 'remove') {
-          const edge = edges.find(e => e.id === change.id);
-          if (edge) {
-            removeWire(model, edge.source, edge.target);
-          }
+        const edge = change.type === 'remove' ? instance.getEdge(change.id) : undefined;
+        if (edge) {
+          removeWire(graph, edge.source, edge.target);
         }
       }
     },
-    [edges, model]
+    [graph, instance]
   );
   const isValidConnection: IsValidConnection<DagEdge> = useCallback(
     (c: DagEdge | Connection) => !!c.source && !!c.target && !wouldCreateCycle(graph.wires, c.source, c.target),
@@ -275,22 +253,22 @@ function DagFlow({ graph, settings, layoutRequested, onInit }: IDagCanvasProps):
   );
   const onConnect: OnConnect = useCallback(
     (connection: Connection) => {
-      const wire = addWire(model, connection.source, connection.target);
+      const wire = addWire(graph, connection.source, connection.target);
       if (wire) {
         setEdges(current => addEdge(wireToEdge(wire), current));
       }
     },
-    [model]
+    [graph]
   );
   const onReconnect = useCallback(
     (oldEdge: DagEdge, connection: Connection) => {
-      removeWire(model, oldEdge.source, oldEdge.target);
-      const wire = addWire(model, connection.source, connection.target);
+      removeWire(graph, oldEdge.source, oldEdge.target);
+      const wire = addWire(graph, connection.source, connection.target);
       if (wire) {
         setEdges(current => reconnectEdge(oldEdge, connection, current));
       }
     },
-    [model]
+    [graph]
   );
   const onConnectEnd: OnConnectEnd = useCallback((_event, state) => {
     if (!state.toNode) {
@@ -303,11 +281,6 @@ function DagFlow({ graph, settings, layoutRequested, onInit }: IDagCanvasProps):
     void selected;
   }, []);
   useOnSelectionChange({ onChange: onSelectionChange });
-  // Backspace on a selected node must not delete the cell's wires behind its back: only selected edges go.
-  const onBeforeDelete: OnBeforeDelete<CellNode, DagEdge> = useCallback(
-    async ({ edges: toDelete }) => ({ nodes: [], edges: toDelete.filter(e => e.selected) }),
-    []
-  );
   const onMoveEnd = useCallback(
     (_event: unknown, viewport: Viewport) => setNotebookMetadata(model, { ...getNotebookMetadata(model), viewport }),
     [model]
@@ -318,13 +291,11 @@ function DagFlow({ graph, settings, layoutRequested, onInit }: IDagCanvasProps):
       edges={edges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
-      onInit={onInit}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onConnectEnd={onConnectEnd}
       onReconnect={onReconnect}
-      onBeforeDelete={onBeforeDelete}
       onMoveEnd={onMoveEnd}
       isValidConnection={isValidConnection}
       connectionMode={ConnectionMode.Strict}
