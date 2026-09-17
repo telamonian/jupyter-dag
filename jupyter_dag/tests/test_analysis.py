@@ -1,5 +1,5 @@
 import pytest
-from jupyter_dag.analysis import analyze_cell, analyze_cells, transform_cell
+from jupyter_dag.analysis import analyze_cell, analyze_cells
 
 @pytest.mark.parametrize(
     ("code", "defined", "referenced", "deleted"),
@@ -19,7 +19,6 @@ def test_defined_referenced_deleted(code, defined, referenced, deleted):
 
 
 def test_line_magic_is_transformed():
-    assert "run_line_magic" in transform_cell("x = %timeit -o pass")
     assert analyze_cell("c", "x = %timeit -o pass")["defined"] == ["x"]
 
 

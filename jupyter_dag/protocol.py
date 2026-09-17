@@ -14,8 +14,9 @@ COMM_TARGET = "jupyter-dag"
 # JEP 92 supported_features strings, spelled like ipykernel's own ("kernel subshells", "debugger").
 FEATURE_ANALYZE = "cell analysis"
 FEATURE_NAMESPACE_DELETE = "namespace delete"
+FEATURE_NAMESPACE_SET = "namespace set"
 FEATURE_NAMESPACE_DELTA = "namespace delta"
-ALL_FEATURES: tuple[str, ...] = (FEATURE_ANALYZE, FEATURE_NAMESPACE_DELETE, FEATURE_NAMESPACE_DELTA)
+ALL_FEATURES: tuple[str, ...] = (FEATURE_ANALYZE, FEATURE_NAMESPACE_DELETE, FEATURE_NAMESPACE_SET, FEATURE_NAMESPACE_DELTA)
 
 ANALYZE_REQUEST = "analyze_request"
 ANALYZE_REPLY = "analyze_reply"

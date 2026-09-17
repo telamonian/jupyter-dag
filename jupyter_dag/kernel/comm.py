@@ -46,23 +46,17 @@ class DagCommTarget:
 
     def _on_msg(self, comm: BaseComm, msg: dict[str, Any]) -> None:
         request: CommRequest = msg["content"]["data"]
-        msg_type = request.get("type", "")
-        handler = self._handlers.get(msg_type)
-        reply: dict[str, Any]
-        if handler is None:
-            reply = {"status": "error", "ename": "UnknownRequest", "evalue": msg_type}
-        else:
-            try:
-                reply = {"status": "ok", **handler(request)}
-            except Exception as exc:  # noqa: BLE001 - surface to the frontend
-                reply = error_content(exc)
+        try:
+            reply = {"status": "ok", **self._handlers[request.get("type", "")](request)}
+        except Exception as exc:  # noqa: BLE001 - surface to the frontend; an unknown type is a KeyError
+            reply = error_content(exc)
         comm.send(reply)
 
     def _analyze(self, request: CommRequest) -> dict[str, Any]:
-        return {"cells": analyze_cells(request.get("cells", []))}
+        return {"cells": analyze_cells(request["cells"])}
 
     def _namespace_delete(self, request: CommRequest) -> dict[str, Any]:
-        return {"removed": delete_names(self._shell, request.get("names", []))}
+        return {"removed": delete_names(self._shell, request["names"])}
 
     def _namespace_set(self, request: CommRequest) -> dict[str, Any]:
-        return {"set": set_names(self._shell, request.get("values", {}))}
+        return {"set": set_names(self._shell, request["values"])}

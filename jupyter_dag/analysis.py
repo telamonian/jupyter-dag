@@ -5,7 +5,7 @@ import symtable
 
 from IPython.core.inputtransformer2 import TransformerManager
 
-from .protocol import AnalyzeCellInput, AnalyzedCell, AnalyzedCellError, AnalyzedCellOk
+from .protocol import AnalyzeCellInput, AnalyzedCell, AnalyzedCellOk
 
 DYNAMIC_CALLS = frozenset({"exec", "eval", "globals", "locals", "vars", "__import__", "run_cell_magic"})
 # Analysis needs no shell state, so one stateless transformer serves the shell channel, the control channel and the comm.
@@ -52,7 +52,7 @@ def analyze_source(cell_id: str, src: str) -> AnalyzedCellOk:
         child = stack.pop()
         for sym in child.get_symbols():
             name = sym.get_name()
-            if "." in name:  # 3.14 __annotate__ scopes expose e.g. '.format'
+            if not name.isidentifier():  # CPython's synthesised scope locals ('.format', '.defaults', ...)
                 continue
             if sym.is_declared_global() and sym.is_assigned():
                 defined.add(name)
@@ -73,9 +73,8 @@ def analyze_cell(cell_id: str, code: str) -> AnalyzedCell:
     try:
         return analyze_source(cell_id, transform_cell(code))
     except SyntaxError as exc:
-        error: AnalyzedCellError = {"cell_id": cell_id, "status": "error", "ename": type(exc).__name__, "evalue": str(exc)}
-        return error
+        return {"cell_id": cell_id, "status": "error", "ename": type(exc).__name__, "evalue": str(exc)}
 
 
 def analyze_cells(cells: list[AnalyzeCellInput]) -> list[AnalyzedCell]:
-    return [analyze_cell(c.get("cell_id", ""), c.get("code", "")) for c in cells]
+    return [analyze_cell(c["cell_id"], c["code"]) for c in cells]

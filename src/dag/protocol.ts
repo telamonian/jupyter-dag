@@ -12,6 +12,7 @@ export const KERNEL_NAME = 'jupyter-dag';
 export const COMM_TARGET = 'jupyter-dag';
 export const FEATURE_ANALYZE = 'cell analysis';
 export const FEATURE_NAMESPACE_DELETE = 'namespace delete';
+export const FEATURE_NAMESPACE_SET = 'namespace set';
 export const FEATURE_NAMESPACE_DELTA = 'namespace delta';
 export const ANALYZE_REQUEST = 'analyze_request';
 export const ANALYZE_REPLY = 'analyze_reply';

@@ -40,8 +40,7 @@ def _load_jupyter_server_extension(server_app):
     allowed = list(kernel_manager.allowed_message_types)
     if allowed and ANALYZE_REQUEST not in allowed:
         kernel_manager.allowed_message_types = [*allowed, ANALYZE_REQUEST]
-    name = "jupyter_dag"
-    server_app.log.info(f"Registered {name} server extension")
+    server_app.log.info("Registered jupyter_dag server extension")
 
 
 def load_ipython_extension(ipython):

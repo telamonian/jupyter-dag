@@ -1,20 +1,19 @@
 """End-to-end tests against a real DagKernel started through jupyter_client."""
 
-from pathlib import Path
-
 import pytest
 
 from jupyter_dag.client import start_dag_kernel
-from jupyter_dag.protocol import ALL_FEATURES
+from jupyter_dag.kernel.install import write_kernel_spec
+from jupyter_dag.protocol import ALL_FEATURES, KERNEL_NAME
 
 pytestmark = pytest.mark.timeout(120)
-KERNEL_DIRS = [str(Path(__file__).resolve().parents[2] / "jupyter-config" / "kernels")]
 
 
 @pytest.fixture(scope="module")
-def dag_client():
-    # The shipped spec's argv[0] is "python", which jupyter_client resolves to this interpreter.
-    km, kc = start_dag_kernel(kernel_dirs=KERNEL_DIRS)
+def dag_client(tmp_path_factory):
+    kernels = tmp_path_factory.mktemp("kernels")
+    write_kernel_spec(kernels / KERNEL_NAME)  # argv[0] is this interpreter
+    km, kc = start_dag_kernel(kernel_dirs=[str(kernels)])
     try:
         yield kc
     finally:

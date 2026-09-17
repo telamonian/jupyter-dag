@@ -85,9 +85,13 @@ You can edit `AGENTS.md` to add project-specific conventions or adjust guideline
 ## Kernel
 
 The DAG view talks to a kernel that understands `analyze_request`, `namespace_delete` and
-`namespace_delta` (advertised through `supported_features`). Two ways to get one:
+`namespace_delta` (advertised through `supported_features`). Three ways to get one:
 
-- the kernelspec `Python 3 (jupyter-dag)` installed with the wheel (`jupyter kernelspec list`);
+- the kernelspec `Python 3 (jupyter-dag)` installed with the wheel (`jupyter kernelspec list`); its argv
+  starts with a bare `python`, which jupyter_client resolves to the server's interpreter, so it only works
+  when the server and the kernel share an environment;
+- `jupyter-dag-kernel --sys-prefix` (or `python -m jupyter_dag.kernel.install`), run from the interpreter
+  the kernel should use: like `python -m ipykernel install`, it records that interpreter;
 - `%load_ext jupyter_dag` inside a stock Python kernel, which adds the handlers and comm target to the
   running kernel; the frontend uses the comm transport until the kernel is restarted.
 

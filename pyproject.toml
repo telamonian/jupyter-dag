@@ -28,7 +28,6 @@ dependencies = [
     "ipython>=8.10",
     "jupyter_client>=8.6,<9",
     "comm>=0.2",
-    "traitlets>=5.9",
 ]
 dynamic = ["version", "description", "authors", "urls", "keywords"]
 
@@ -45,6 +44,9 @@ test = [
     "pytest-timeout",
     "pytest-jupyter[server]>=0.6.0"
 ]
+
+[project.scripts]
+jupyter-dag-kernel = "jupyter_dag.kernel.install:main"
 
 [project.entry-points."jupyter_client.kernel_provisioners"]
 jupyter-dag-provisioner = "jupyter_dag.provisioner:DagKernelProvisioner"
