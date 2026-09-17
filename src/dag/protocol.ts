@@ -1,5 +1,5 @@
 import { KernelMessage } from '@jupyterlab/services';
-import type { Kernel } from '@jupyterlab/services';
+import type { Kernel, Session } from '@jupyterlab/services';
 import type { ISessionContext } from '@jupyterlab/apputils';
 import type { JSONObject, JSONValue } from '@lumino/coreutils';
 import { Signal } from '@lumino/signaling';
@@ -63,7 +63,6 @@ export function readNamespaceDelta(reply: KernelMessage.IExecuteReplyMsg | undef
 
 /** One way of carrying the DAG payloads to a kernel; the client picks it from the advertised features. */
 export interface IDagTransport extends IDisposable {
-  readonly namespaceDelta: ISignal<IDagTransport, INamespaceDelta>;
   analyze(content: IAnalyzeRequestContent): Promise<IAnalyzeReplyOk>;
   namespaceDelete(names: string[]): Promise<void>;
 }
@@ -77,13 +76,7 @@ export class ShellTransport implements IDagTransport {
   constructor(
     private _kernel: Kernel.IKernelConnection,
     private _channel: AnalyzeChannel = 'shell'
-  ) {
-    // The kernel attaches namespace_delta to every execute_reply, whoever sent the request.
-    _kernel.anyMessage.connect(this._onAnyMessage, this);
-  }
-  get namespaceDelta(): ISignal<this, INamespaceDelta> {
-    return this._delta;
-  }
+  ) {}
   async analyze(content: IAnalyzeRequestContent): Promise<IAnalyzeReplyOk> {
     const kernel = this._kernel;
     const msg = KernelMessage.createMessage<ShellStandIn>({
@@ -114,25 +107,12 @@ export class ShellTransport implements IDagTransport {
     };
     await this._kernel.requestExecute(content as unknown as KernelMessage.IExecuteRequestMsg['content'], true).done;
   }
-  private _onAnyMessage(_: unknown, { msg, direction }: Kernel.IAnyMessageArgs): void {
-    if (direction === 'recv' && KernelMessage.isExecuteReplyMsg(msg)) {
-      const delta = readNamespaceDelta(msg);
-      if (delta) {
-        this._delta.emit(delta);
-      }
-    }
-  }
   get isDisposed(): boolean {
     return this._isDisposed;
   }
   dispose(): void {
-    if (this._isDisposed) {
-      return;
-    }
     this._isDisposed = true;
-    Signal.clearData(this); // also drops the anyMessage connection
   }
-  private _delta = new Signal<this, INamespaceDelta>(this);
   private _isDisposed = false;
 }
 
@@ -144,7 +124,7 @@ interface ICommPayload {
 /**
  * The no-protocol-change prototype: the same payloads over the `jupyter-dag` comm target.
  * Replies ride the request's comm future (ipykernel stamps them with the request as parent);
- * kernel-initiated messages (namespace_delta) arrive through comm.onMsg.
+ * the kernel's `features` message on open arrives through comm.onMsg.
  */
 export class CommTransport implements IDagTransport {
   constructor(private _kernel: Kernel.IKernelConnection) {
@@ -156,9 +136,6 @@ export class CommTransport implements IDagTransport {
     void msg.content.target_name;
     void comm; // TODO: adopt it as this._comm and attach onMsg / onClose exactly as open() does
   };
-  get namespaceDelta(): ISignal<this, INamespaceDelta> {
-    return this._delta;
-  }
   /** Advertised by the kernel on comm open (a stock kernel after %load_ext never updates kernel_info). */
   get features(): ReadonlySet<string> {
     return this._features;
@@ -171,9 +148,7 @@ export class CommTransport implements IDagTransport {
     const comm = kernel.createComm(COMM_TARGET); // a fresh comm id each time: reuse after reconnect throws
     comm.onMsg = (msg: KernelMessage.ICommMsgMsg) => {
       const data = msg.content.data as unknown as ICommPayload;
-      if (data.type === 'namespace_delta') {
-        this._delta.emit(data as unknown as INamespaceDelta);
-      } else if (data.type === 'features') {
+      if (data.type === 'features') {
         this._features = new Set(data.supported_features ?? []);
       }
     };
@@ -220,10 +195,8 @@ export class CommTransport implements IDagTransport {
     this._kernel.removeCommTarget(COMM_TARGET, this._onKernelInitiated);
     this._comm?.close();
     this._comm?.dispose();
-    Signal.clearData(this);
   }
   private _comm: Kernel.IComm | null = null;
-  private _delta = new Signal<this, INamespaceDelta>(this);
   private _features = new Set<string>();
   private _isDisposed = false;
 }
@@ -235,6 +208,7 @@ export class DagKernelClient implements IDisposable {
     this._analyzeChannel = analyzeChannel;
     sessionContext.kernelChanged.connect(this._onKernelChanged, this);
     sessionContext.statusChanged.connect(this._onStatusChanged, this);
+    this.kernel?.anyMessage.connect(this._onAnyMessage, this);
   }
   get kernel(): Kernel.IKernelConnection | null | undefined {
     return this._sessionContext.session?.kernel;
@@ -265,7 +239,6 @@ export class DagKernelClient implements IDisposable {
       }
       this._features = features;
       this._transport = transport;
-      transport?.namespaceDelta.connect((_, d) => this._namespaceDelta.emit(d));
     }
     this._featuresChanged.emit(this._features);
   }
@@ -292,8 +265,22 @@ export class DagKernelClient implements IDisposable {
     comm.features.forEach(f => features.add(f));
     return comm;
   }
-  private _onKernelChanged(): void {
+  private _onKernelChanged(
+    _: ISessionContext,
+    { oldValue, newValue }: Session.ISessionConnection.IKernelChangedArgs
+  ): void {
+    oldValue?.anyMessage.disconnect(this._onAnyMessage, this);
+    newValue?.anyMessage.connect(this._onAnyMessage, this);
     void this.detectFeatures();
+  }
+  /** The kernel attaches namespace_delta to every execute_reply, whoever sent the request. */
+  private _onAnyMessage(_: unknown, { msg, direction }: Kernel.IAnyMessageArgs): void {
+    if (direction === 'recv' && KernelMessage.isExecuteReplyMsg(msg)) {
+      const delta = readNamespaceDelta(msg);
+      if (delta) {
+        this._namespaceDelta.emit(delta);
+      }
+    }
   }
   private _onStatusChanged(_: ISessionContext, status: Kernel.Status): void {
     if (status === 'restarting' || status === 'autorestarting') {

@@ -46,9 +46,6 @@ test = [
     "pytest-jupyter[server]>=0.6.0"
 ]
 
-[project.scripts]
-jupyter-dag-kernel = "jupyter_dag.kernel.install:main"
-
 [project.entry-points."jupyter_client.kernel_provisioners"]
 jupyter-dag-provisioner = "jupyter_dag.provisioner:DagKernelProvisioner"
 

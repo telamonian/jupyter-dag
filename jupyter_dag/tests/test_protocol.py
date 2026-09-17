@@ -2,13 +2,10 @@
 
 import json
 import re
-import sys
 from pathlib import Path
 
-import pytest
-
 import jupyter_dag.protocol as protocol
-from jupyter_dag.kernel.install import kernel_json
+from jupyter_dag.kernel.kernelspec import kernel_json
 
 ROOT = Path(__file__).resolve().parents[2]
 MIRRORED = (
@@ -29,7 +26,6 @@ def test_constants_match_typescript():
         assert ts[name] == getattr(protocol, name), name
 
 
-@pytest.mark.skipif(sys.version_info < (3, 11), reason="the shipped spec carries the 3.11+ frozen-modules flag")
 def test_shipped_kernelspec_matches_generator():
     shipped = json.loads((ROOT / "jupyter-config" / "kernels" / "jupyter-dag" / "kernel.json").read_text())
-    assert shipped == kernel_json(executable="python")
+    assert shipped == kernel_json()

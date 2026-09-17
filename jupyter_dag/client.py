@@ -29,15 +29,7 @@ def _namespace_delete(self: KernelClient, names: list[str]) -> str:
     -------
     The msg_id of the message sent.
     """
-    content = {
-        "code": "",
-        "silent": True,
-        "store_history": False,
-        "user_expressions": {},
-        "allow_stdin": False,
-        "stop_on_error": True,
-        "namespace_delete": list(names),
-    }
+    content = {"code": "", "silent": True, "store_history": False, "namespace_delete": list(names)}
     msg = self.session.msg("execute_request", content)
     self.shell_channel.send(msg)
     return msg["header"]["msg_id"]

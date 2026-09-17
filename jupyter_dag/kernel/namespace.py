@@ -9,15 +9,17 @@ from IPython.core.interactiveshell import InteractiveShell
 
 from ..protocol import NamespaceDelta
 
+_MISSING = object()
+
 
 def visible_names(shell: InteractiveShell) -> set[str]:
-    """User-visible global names.
+    """User-visible global names, by ``%who_ls``'s rule (IPython/core/magics/namespace.py).
 
-    IPython already hides its own injections (In, Out, _, _i1, get_ipython, exit, ...) through
-    ``user_ns_hidden`` (init_user_ns, and the history and displayhook pushes with interactive=False),
-    so the difference of the two key sets is the visible namespace.
+    No ``_`` prefix, and not one of the objects IPython injected itself (In, Out, get_ipython, exit, ...),
+    which ``user_ns_hidden`` records; the identity test keeps a user's own rebinding of such a name visible.
     """
-    return {n for n in shell.user_ns.keys() - shell.user_ns_hidden.keys() if not n.startswith("_")}
+    hidden = shell.user_ns_hidden
+    return {n for n, v in shell.user_ns.items() if not n.startswith("_") and hidden.get(n, _MISSING) is not v}
 
 
 def delete_names(shell: InteractiveShell, names: Iterable[str]) -> list[str]:

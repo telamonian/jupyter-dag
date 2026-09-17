@@ -6,14 +6,20 @@ that exec()s comm-supplied source is deliberately omitted.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 from typing import Any
 
 from comm.base_comm import BaseComm, CommManager
+from IPython.core.interactiveshell import InteractiveShell
 
-from ..protocol import ALL_FEATURES, COMM_TARGET, CommRequest
-
-Handler = Callable[[CommRequest], dict[str, Any] | None]
+from ..analysis import analyze_cells
+from ..protocol import (
+    ALL_FEATURES,
+    ANALYZE_REQUEST,
+    COMM_TARGET,
+    CommRequest,
+    error_content,
+)
+from .namespace import delete_names, set_names
 
 
 class DagCommTarget:
@@ -21,39 +27,42 @@ class DagCommTarget:
 
     A reply is sent through ``comm.send`` while the request is being handled, so ipykernel stamps it
     with the request as parent and the frontend's comm future receives it: no request ids needed.
+    namespace_delta is not carried here: DagKernel attaches it to every execute_reply.
     """
 
-    def __init__(self, comm_manager: CommManager, handlers: Mapping[str, Handler]) -> None:
-        self._handlers = dict(handlers)
-        self._comms: list[BaseComm] = []
+    def __init__(self, comm_manager: CommManager, shell: InteractiveShell) -> None:
+        self._shell = shell
+        self._handlers = {
+            ANALYZE_REQUEST: self._analyze,
+            "namespace_delete": self._namespace_delete,
+            "namespace_set": self._namespace_set,
+        }
         comm_manager.register_target(COMM_TARGET, self._on_open)
 
-    def broadcast(self, payload: dict[str, Any]) -> None:
-        """Push a kernel-initiated message (namespace_delta) to every open comm."""
-        for comm in list(self._comms):
-            comm.send(payload)
-
     def _on_open(self, comm: BaseComm, open_msg: dict[str, Any]) -> None:
-        self._comms.append(comm)
         comm.on_msg(lambda msg: self._on_msg(comm, msg))
-        comm.on_close(lambda _msg: self._forget(comm))
         # A stock kernel that loaded the extension at runtime never updates kernel_info: advertise here too.
         comm.send({"type": "features", "supported_features": list(ALL_FEATURES)})
-
-    def _forget(self, comm: BaseComm) -> None:
-        if comm in self._comms:
-            self._comms.remove(comm)
 
     def _on_msg(self, comm: BaseComm, msg: dict[str, Any]) -> None:
         request: CommRequest = msg["content"]["data"]
         msg_type = request.get("type", "")
-        reply: dict[str, Any] = {"type": msg_type.replace("_request", "_reply"), "status": "ok"}
         handler = self._handlers.get(msg_type)
+        reply: dict[str, Any]
         if handler is None:
-            reply.update(status="error", ename="UnknownRequest", evalue=msg_type)
+            reply = {"status": "error", "ename": "UnknownRequest", "evalue": msg_type}
         else:
             try:
-                reply.update(handler(request) or {})
+                reply = {"status": "ok", **handler(request)}
             except Exception as exc:  # noqa: BLE001 - surface to the frontend
-                reply.update(status="error", ename=type(exc).__name__, evalue=str(exc))
+                reply = error_content(exc)
         comm.send(reply)
+
+    def _analyze(self, request: CommRequest) -> dict[str, Any]:
+        return {"cells": analyze_cells(request.get("cells", []))}
+
+    def _namespace_delete(self, request: CommRequest) -> dict[str, Any]:
+        return {"removed": delete_names(self._shell, request.get("names", []))}
+
+    def _namespace_set(self, request: CommRequest) -> dict[str, Any]:
+        return {"set": set_names(self._shell, request.get("values", {}))}

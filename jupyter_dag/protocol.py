@@ -45,14 +45,14 @@ class AnalyzedCellError(TypedDict):
 AnalyzedCell = AnalyzedCellOk | AnalyzedCellError
 
 
-class AnalyzeReplyContent(TypedDict):
-    status: Literal["ok"]
-    cells: list[AnalyzedCell]
-
-
 class NamespaceDelta(TypedDict):
     added: list[str]
     removed: list[str]
+
+
+def error_content(exc: BaseException) -> dict[str, Any]:
+    """The error form of a reply, spelled like execute_reply's."""
+    return {"status": "error", "ename": type(exc).__name__, "evalue": str(exc), "traceback": []}
 
 
 class CommRequest(TypedDict, total=False):
