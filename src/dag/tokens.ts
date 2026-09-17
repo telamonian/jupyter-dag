@@ -22,12 +22,15 @@ export namespace CommandIDs {
   export const autoLayout = 'jupyter-dag:auto-layout';
 }
 
+export type LayoutDirection = 'TB' | 'LR';
+export type AnalyzeChannel = 'shell' | 'control';
+
 /** User settings declared in schema/plugin.json under PLUGIN_ID; the schema supplies the defaults. */
 export interface IDagSettings {
-  layoutDirection: 'TB' | 'LR';
+  layoutDirection: LayoutDirection;
   maxZoom: number;
   outputOnlyNodes: boolean;
-  analyzeChannel: 'shell' | 'control';
+  analyzeChannel: AnalyzeChannel;
 }
 /** Narrow the settings registry's composite (JSON) to IDagSettings. */
 export function readSettings(composite: ReadonlyPartialJSONObject): IDagSettings {
@@ -49,7 +52,7 @@ export interface IDagCellMetadata extends PartialJSONObject {
 /** Persisted at notebook level under notebook.metadata['jupyter-dag']. */
 export interface IDagNotebookMetadata extends PartialJSONObject {
   version: 1;
-  direction?: 'TB' | 'LR';
+  direction?: LayoutDirection;
   viewport?: { x: number; y: number; zoom: number };
 }
 export interface IWire {
@@ -57,7 +60,7 @@ export interface IWire {
   source: string;
   target: string;
 }
-export type DagNodeState = 'fresh' | 'stale' | 'queued' | 'running' | 'error';
+export type DagNodeState = 'fresh' | 'stale' | 'queued' | 'error';
 /** What changed: the cell list, the wires, or the per-node execution state of `cellIds`. */
 export interface IDagGraphChange {
   type: 'nodes' | 'edges' | 'state';

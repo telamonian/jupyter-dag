@@ -5,6 +5,7 @@ import type { JSONObject, JSONValue } from '@lumino/coreutils';
 import { Signal } from '@lumino/signaling';
 import type { ISignal } from '@lumino/signaling';
 import type { IDisposable } from '@lumino/disposable';
+import type { AnalyzeChannel } from './tokens';
 
 // Must match jupyter_dag/protocol.py verbatim; jupyter_dag/tests/test_protocol.py checks.
 export const KERNEL_NAME = 'jupyter-dag';
@@ -52,7 +53,6 @@ export type IDagExecuteRequestContent = KernelMessage.IExecuteRequestMsg['conten
   namespace_set?: JSONObject;
 };
 export type IDagExecuteReplyContent = KernelMessage.IExecuteReplyMsg['content'] & { namespace_delta?: INamespaceDelta };
-export type AnalyzeChannel = 'shell' | 'control';
 
 export function readNamespaceDelta(reply: KernelMessage.IExecuteReplyMsg | undefined): INamespaceDelta | undefined {
   if (!reply || reply.content.status !== 'ok') {
@@ -77,7 +77,10 @@ export class ShellTransport implements IDagTransport {
   constructor(
     private _kernel: Kernel.IKernelConnection,
     private _channel: AnalyzeChannel = 'shell'
-  ) {}
+  ) {
+    // The kernel attaches namespace_delta to every execute_reply, whoever sent the request.
+    _kernel.anyMessage.connect(this._onAnyMessage, this);
+  }
   get namespaceDelta(): ISignal<this, INamespaceDelta> {
     return this._delta;
   }
@@ -103,25 +106,21 @@ export class ShellTransport implements IDagTransport {
   }
   /** 'Purge without running': a silent execute of empty code carrying namespace_delete. */
   async namespaceDelete(names: string[]): Promise<void> {
-    await this.requestExecute({ code: '', silent: true, store_history: false, namespace_delete: names }).done;
-  }
-  /** execute_request with the namespace_delete / namespace_set extensions; namespace_delta comes back on the reply. */
-  requestExecute(
-    content: IDagExecuteRequestContent,
-    metadata?: JSONObject
-  ): Kernel.IShellFuture<KernelMessage.IExecuteRequestMsg, KernelMessage.IExecuteReplyMsg> {
-    const future = this._kernel.requestExecute(
-      content as unknown as KernelMessage.IExecuteRequestMsg['content'],
-      true, // dispose the future when done; nothing keeps it
-      metadata
-    );
-    future.onReply = (msg: KernelMessage.IExecuteReplyMsg) => {
-      const d = readNamespaceDelta(msg);
-      if (d) {
-        this._delta.emit(d);
-      }
+    const content: IDagExecuteRequestContent = {
+      code: '',
+      silent: true,
+      store_history: false,
+      namespace_delete: names
     };
-    return future;
+    await this._kernel.requestExecute(content as unknown as KernelMessage.IExecuteRequestMsg['content'], true).done;
+  }
+  private _onAnyMessage(_: unknown, { msg, direction }: Kernel.IAnyMessageArgs): void {
+    if (direction === 'recv' && KernelMessage.isExecuteReplyMsg(msg)) {
+      const delta = readNamespaceDelta(msg);
+      if (delta) {
+        this._delta.emit(delta);
+      }
+    }
   }
   get isDisposed(): boolean {
     return this._isDisposed;
@@ -131,7 +130,7 @@ export class ShellTransport implements IDagTransport {
       return;
     }
     this._isDisposed = true;
-    Signal.clearData(this);
+    Signal.clearData(this); // also drops the anyMessage connection
   }
   private _delta = new Signal<this, INamespaceDelta>(this);
   private _isDisposed = false;
@@ -243,9 +242,6 @@ export class DagKernelClient implements IDisposable {
   get features(): ReadonlySet<string> {
     return this._features;
   }
-  get supportsAnalyze(): boolean {
-    return this._transport !== null;
-  }
   get namespaceDelta(): ISignal<this, INamespaceDelta> {
     return this._namespaceDelta;
   }
@@ -253,30 +249,36 @@ export class DagKernelClient implements IDisposable {
   get featuresChanged(): ISignal<this, ReadonlySet<string>> {
     return this._featuresChanged;
   }
-  async detectFeatures(): Promise<ReadonlySet<string>> {
+  async detectFeatures(): Promise<void> {
+    const generation = ++this._generation; // a newer call (kernel change, restart) supersedes this one
     this._transport?.dispose();
     this._transport = null;
     this._features = new Set();
     const kernel = this.kernel;
     if (kernel) {
       // kernel_info_reply.supported_features is the source of truth; `info` is the connection's first reply.
-      this._features = new Set((await kernel.info).supported_features ?? []);
-      this._transport = await this._openTransport(kernel);
-      this._transport?.namespaceDelta.connect((_, d) => this._namespaceDelta.emit(d));
+      const features = new Set((await kernel.info).supported_features ?? []);
+      const transport = await this._openTransport(kernel, features);
+      if (generation !== this._generation) {
+        transport?.dispose();
+        return;
+      }
+      this._features = features;
+      this._transport = transport;
+      transport?.namespaceDelta.connect((_, d) => this._namespaceDelta.emit(d));
     }
     this._featuresChanged.emit(this._features);
-    return this._features;
   }
+  /** Per-cell defined/referenced names, or nothing when the kernel offers no analysis. */
   async analyze(cells: IAnalyzeCellInput[]): Promise<IAnalyzedCell[]> {
-    const reply = await this._transportOrThrow().analyze({ cells });
-    return reply.cells;
+    return this._transport ? (await this._transport.analyze({ cells })).cells : [];
   }
-  /** Unbind names in the kernel. */
+  /** Unbind names in the kernel, if it supports that. */
   async namespaceDelete(names: string[]): Promise<void> {
-    await this._transportOrThrow().namespaceDelete(names);
+    await this._transport?.namespaceDelete(names);
   }
-  private async _openTransport(kernel: Kernel.IKernelConnection): Promise<IDagTransport | null> {
-    if (this._features.has(FEATURE_ANALYZE)) {
+  private async _openTransport(kernel: Kernel.IKernelConnection, features: Set<string>): Promise<IDagTransport | null> {
+    if (features.has(FEATURE_ANALYZE)) {
       return new ShellTransport(kernel, this._analyzeChannel);
     }
     // e.g. a stock kernel after `%load_ext jupyter_dag`: kernel_info was answered before the extension loaded.
@@ -287,14 +289,8 @@ export class DagKernelClient implements IDisposable {
       comm.dispose();
       return null;
     }
-    this._features = new Set([...this._features, ...comm.features]);
+    comm.features.forEach(f => features.add(f));
     return comm;
-  }
-  private _transportOrThrow(): IDagTransport {
-    if (!this._transport) {
-      throw new Error('no DAG transport');
-    }
-    return this._transport;
   }
   private _onKernelChanged(): void {
     void this.detectFeatures();
@@ -327,5 +323,6 @@ export class DagKernelClient implements IDisposable {
   private _namespaceDelta = new Signal<this, INamespaceDelta>(this);
   private _featuresChanged = new Signal<this, ReadonlySet<string>>(this);
   private _redetect = false;
+  private _generation = 0;
   private _isDisposed = false;
 }

@@ -3,7 +3,7 @@ import type { CellList, INotebookModel } from '@jupyterlab/notebook';
 import type { IObservableList } from '@jupyterlab/observables';
 import type { CellChange, IMapChange, ISharedCell } from '@jupyter/ydoc';
 import type { ReadonlyPartialJSONObject } from '@lumino/coreutils';
-import { find } from '@lumino/algorithm';
+import { ArrayExt, find } from '@lumino/algorithm';
 import { Signal } from '@lumino/signaling';
 import type { ISignal } from '@lumino/signaling';
 import type { IDisposable } from '@lumino/disposable';
@@ -26,17 +26,15 @@ export function wireId(source: string, target: string): string {
 export function getCellMetadata(cell: ICellModel): IDagCellMetadata {
   return readCellMetadata(cell.getMetadata(METADATA_KEY) as ReadonlyPartialJSONObject | undefined);
 }
-export function setCellMetadata(cell: ICellModel, value: IDagCellMetadata): void {
-  cell.setMetadata(METADATA_KEY, value); // ydoc skips deep-equal values; never pass undefined (it deletes the key)
-}
 export function updateCellMetadata(cell: ICellModel, patch: Partial<IDagCellMetadata>): void {
-  setCellMetadata(cell, { ...getCellMetadata(cell), ...patch });
+  // ydoc skips deep-equal values; never pass undefined (it deletes the key).
+  cell.setMetadata(METADATA_KEY, { ...getCellMetadata(cell), ...patch });
 }
 export function getNotebookMetadata(model: INotebookModel): IDagNotebookMetadata {
   return (model.getMetadata(METADATA_KEY) as IDagNotebookMetadata | undefined) ?? { version: 1 };
 }
-export function setNotebookMetadata(model: INotebookModel, value: IDagNotebookMetadata): void {
-  model.setMetadata(METADATA_KEY, value);
+export function updateNotebookMetadata(model: INotebookModel, patch: Partial<IDagNotebookMetadata>): void {
+  model.setMetadata(METADATA_KEY, { ...getNotebookMetadata(model), ...patch });
 }
 /** Wires whose source cell still exists; inputs pointing at deleted cells are ignored, not rewritten. */
 export function collectWires(model: INotebookModel): IWire[] {
@@ -193,6 +191,12 @@ export class DagGraphModel implements IDagGraphModel, IDisposable {
   private _onCellsChanged(_: CellList, args: IObservableList.IChangedArgs<ICellModel>): void {
     // Removed cells are disposed by CellList, which also drops their signal connections.
     args.newValues.forEach(c => this._track(c));
+    const live = new Set(this.cellIds);
+    for (const id of this._state.keys()) {
+      if (!live.has(id)) {
+        this._state.delete(id);
+      }
+    }
     this._wires = null;
     this._changed.emit({ type: 'nodes' });
   }
@@ -203,7 +207,7 @@ export class DagGraphModel implements IDagGraphModel, IDisposable {
     // Position and size writes share the key with the wires; only a change to `inputs` is a graph change.
     const before = readCellMetadata(change.oldValue as ReadonlyPartialJSONObject | undefined).inputs;
     const after = readCellMetadata(change.newValue as ReadonlyPartialJSONObject | undefined).inputs;
-    if (before.length === after.length && before.every((id, i) => id === after[i])) {
+    if (ArrayExt.shallowEqual(before, after)) {
       return;
     }
     this._wires = null;

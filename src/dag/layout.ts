@@ -1,41 +1,26 @@
 import { graphlib, layout } from '@dagrejs/dagre';
-import type { GraphLabel, NodeLabel } from '@dagrejs/dagre';
+import type { NodeLabel } from '@dagrejs/dagre';
 import { Position } from '@xyflow/react';
 import type { Edge, Node, XYPosition } from '@xyflow/react';
+import type { LayoutDirection } from './tokens';
 
-export type LayoutDirection = 'TB' | 'LR';
-export interface ILayoutOptions extends Pick<GraphLabel, 'nodesep' | 'ranksep' | 'edgesep'> {
-  direction: LayoutDirection;
-  fallbackWidth?: number;
-  fallbackHeight?: number;
-}
-export const DEFAULT_LAYOUT: Required<ILayoutOptions> = {
-  direction: 'TB',
-  nodesep: 24,
-  ranksep: 48,
-  edgesep: 12,
-  fallbackWidth: 360,
-  fallbackHeight: 140
-};
+const NODESEP = 24;
+const RANKSEP = 48;
+const EDGESEP = 12;
+/** Size assumed for nodes React Flow has not measured yet. */
+const FALLBACK = { width: 360, height: 140 };
 
 export function layoutElements<N extends Node, E extends Edge>(
   nodes: N[],
   edges: E[],
-  partial: Partial<ILayoutOptions> = {}
+  direction: LayoutDirection = 'TB'
 ): N[] {
-  const options: Required<ILayoutOptions> = { ...DEFAULT_LAYOUT, ...partial };
   const g = new graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  const label: GraphLabel = {
-    rankdir: options.direction,
-    nodesep: options.nodesep,
-    ranksep: options.ranksep,
-    edgesep: options.edgesep
-  };
-  g.setGraph(label);
+  g.setGraph({ rankdir: direction, nodesep: NODESEP, ranksep: RANKSEP, edgesep: EDGESEP });
   const connected = new Set<string>(edges.flatMap(e => [e.source, e.target]));
   const sizeOf = (n: N) => ({
-    width: n.measured?.width ?? n.width ?? options.fallbackWidth,
-    height: n.measured?.height ?? n.height ?? options.fallbackHeight
+    width: n.measured?.width ?? n.width ?? FALLBACK.width,
+    height: n.measured?.height ?? n.height ?? FALLBACK.height
   });
   for (const n of nodes) {
     if (connected.has(n.id)) {
@@ -46,18 +31,18 @@ export function layoutElements<N extends Node, E extends Edge>(
     g.setEdge(e.source, e.target);
   }
   layout(g);
-  const isLR = options.direction === 'LR';
+  const isLR = direction === 'LR';
   const sourcePosition = isLR ? Position.Right : Position.Bottom;
   const targetPosition = isLR ? Position.Left : Position.Top;
   let sideY = 0;
   // dagre reports an empty graph's width as -Infinity (not null), so `??` is not enough here.
   const graphWidth = g.graph().width;
-  const sideX = (Number.isFinite(graphWidth) ? (graphWidth as number) : 0) + options.ranksep;
+  const sideX = (Number.isFinite(graphWidth) ? (graphWidth as number) : 0) + RANKSEP;
   return nodes.map(n => {
     if (!connected.has(n.id)) {
       // disconnected: stack in a side column (marimo layout.ts precedent)
       const position: XYPosition = { x: sideX, y: sideY };
-      sideY += sizeOf(n).height + options.nodesep;
+      sideY += sizeOf(n).height + NODESEP;
       return { ...n, position, sourcePosition, targetPosition };
     }
     const nl: NodeLabel = g.node(n.id);

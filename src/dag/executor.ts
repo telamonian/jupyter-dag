@@ -2,9 +2,7 @@ import { KernelError, NotebookActions, StaticNotebook } from '@jupyterlab/notebo
 import type { INotebookCellExecutor, Notebook } from '@jupyterlab/notebook';
 import { CodeCell } from '@jupyterlab/cells';
 import type { Cell } from '@jupyterlab/cells';
-import { SessionContextDialogs } from '@jupyterlab/apputils';
 import type { ISessionContext } from '@jupyterlab/apputils';
-import { nullTranslator } from '@jupyterlab/translation';
 import type { ITranslator } from '@jupyterlab/translation';
 import { Signal } from '@lumino/signaling';
 import type { IDisposable } from '@lumino/disposable';
@@ -16,8 +14,6 @@ import type { DagKernelClient, IAnalyzedCell } from './protocol';
 export interface IDagRunOptions {
   mode: 'all' | 'downstream' | 'upstream';
   roots?: string[];
-  inclusive?: boolean;
-  stopOnError?: boolean;
 }
 
 /** Runs cells in wire order through the core cell executor, so each run has the toolbar's semantics. */
@@ -28,32 +24,27 @@ export class DagExecutor implements IDisposable {
     this._cellExecutor = options.cellExecutor;
     this._client = options.client;
     this._widgetFor = options.widgetFor;
-    this._translator = options.translator ?? nullTranslator;
-    this._sessionDialogs = options.sessionDialogs ?? new SessionContextDialogs({ translator: this._translator });
+    this._sessionDialogs = options.sessionDialogs;
+    this._translator = options.translator;
     NotebookActions.executed.connect(this._onExecuted, this);
     NotebookActions.executionScheduled.connect(this._onScheduled, this);
     NotebookActions.selectionExecuted.connect(this._onSelectionExecuted, this);
     NotebookActions.outputCleared.connect(this._onOutputCleared, this);
   }
 
-  async run(options: IDagRunOptions): Promise<boolean> {
-    const { mode, roots = [], inclusive = true, stopOnError = true } = options;
+  /** Run the selected cells in wire order; stops at the first failure. */
+  async run({ mode, roots = [] }: IDagRunOptions): Promise<boolean> {
     const { cellIds, wires } = this._graph;
     let ids = cellIds;
     if (mode !== 'all') {
-      const closure = (mode === 'downstream' ? downstreamOf : upstreamOf)(roots, wires, inclusive);
+      const closure = (mode === 'downstream' ? downstreamOf : upstreamOf)(roots, wires, true);
       ids = cellIds.filter(id => closure.has(id));
     }
-    return this.runCells(topologicalOrder(ids, wires), stopOnError);
-  }
-
-  async runCells(order: string[], stopOnError = true): Promise<boolean> {
     await this._sessionContext.ready;
-    const remaining = new Set(order);
-    for (const cellId of order) {
+    const remaining = new Set(ids);
+    for (const cellId of topologicalOrder(ids, wires)) {
       remaining.delete(cellId);
-      const ok = await this._runOne(cellId, remaining);
-      if (!ok && stopOnError) {
+      if (!(await this._runOne(cellId, remaining))) {
         return false;
       }
     }
@@ -61,14 +52,11 @@ export class DagExecutor implements IDisposable {
   }
 
   async analyzeAll(): Promise<Map<string, IAnalyzedCell>> {
-    const result = new Map<string, IAnalyzedCell>();
-    if (!this._client.supportsAnalyze) {
-      return result;
-    }
     const cells = Array.from(this._graph.notebook.cells, cell => ({
       cell_id: cell.id,
       code: cell.sharedModel.getSource()
     }));
+    const result = new Map<string, IAnalyzedCell>();
     for (const c of await this._client.analyze(cells)) {
       result.set(c.cell_id, c);
     }
@@ -105,8 +93,7 @@ export class DagExecutor implements IDisposable {
       return await this._cellExecutor.runCell(opts); // markdown and raw cells are handled by runCell itself
     } catch (e) {
       if (e instanceof KernelError) {
-        this._graph.setState(cellId, 'error');
-        return false;
+        return false; // runCell has already reported it through onCellExecuted
       }
       throw e;
     }
@@ -165,8 +152,8 @@ export class DagExecutor implements IDisposable {
   private _cellExecutor: INotebookCellExecutor;
   private _client: DagKernelClient;
   private _widgetFor: (cellId: string) => Cell | undefined;
-  private _translator: ITranslator;
-  private _sessionDialogs: ISessionContext.IDialogs;
+  private _sessionDialogs?: ISessionContext.IDialogs;
+  private _translator?: ITranslator;
   private _lastAnalysis = new Map<string, IAnalyzedCell>();
   private _isDisposed = false;
 }

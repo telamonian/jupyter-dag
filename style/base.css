@@ -25,10 +25,6 @@
   border-color: var(--jp-info-color1);
 }
 
-.jp-DagCellNode-running {
-  border-color: var(--jp-brand-color1);
-}
-
 .jp-DagCellNode-error {
   border-color: var(--jp-error-color1);
 }
@@ -47,15 +43,11 @@
   background: var(--jp-brand-color1);
 }
 
-.jp-DagWire {
+/* React Flow puts the edge className on the <g>; the path is its child. */
+.jp-DagWire .react-flow__edge-path {
   stroke: var(--jp-border-color1);
 }
 
-.jp-DagWire.jp-mod-selected {
+.jp-DagPanel .jp-DagWire.selected .react-flow__edge-path {
   stroke: var(--jp-brand-color1);
-}
-
-.jp-DagWire-label {
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
 }

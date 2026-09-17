@@ -21,7 +21,7 @@ describe('layoutElements', () => {
 
   it('places a wired target below its source in top-to-bottom layout', () => {
     const edges: Edge[] = [{ id: 'a->b', source: 'a', target: 'b' }];
-    const [a, b] = layoutElements([node('a'), node('b')], edges, { direction: 'TB' });
+    const [a, b] = layoutElements([node('a'), node('b')], edges, 'TB');
     expect(b.position.y).toBeGreaterThan(a.position.y);
   });
 });

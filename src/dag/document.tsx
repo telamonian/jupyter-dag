@@ -7,7 +7,6 @@ import { LabIcon, ReactWidget } from '@jupyterlab/ui-components';
 import type { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import type { IEditorMimeTypeService } from '@jupyterlab/codeeditor';
 import type { Cell } from '@jupyterlab/cells';
-import type { KernelMessage } from '@jupyterlab/services';
 import { nullTranslator } from '@jupyterlab/translation';
 import type { ITranslator } from '@jupyterlab/translation';
 import { Signal } from '@lumino/signaling';
@@ -48,7 +47,8 @@ export class DagPanel extends ReactWidget {
       contentFactory: options.contentFactory,
       rendermime: options.rendermime,
       translator: options.translator ?? nullTranslator,
-      findCell: id => this.graph.findCell(id),
+      graph: this.graph,
+      outputOnly: this.settings.outputOnlyNodes,
       registerWidget: (id, cell) => {
         if (cell) {
           this._widgets.set(id, cell);
@@ -108,7 +108,7 @@ export class DagPanel extends ReactWidget {
     if (!kernel) {
       return;
     }
-    const info: KernelMessage.IInfoReply = await kernel.info.catch(() => undefined as never);
+    const info = await kernel.info.catch(() => null);
     if (!info) {
       return;
     }
