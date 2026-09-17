@@ -11,7 +11,7 @@ from ..protocol import NamespaceDelta
 
 
 def visible_names(shell: InteractiveShell) -> set[str]:
-    """User-visible global names, as ``%who_ls`` reports them: no ``_`` prefix, none of IPython's own injections."""
+    """User-visible global names, as `%who_ls` reports them: no `_` prefix, none of IPython's own injections."""
     return set(shell.find_magic("who_ls")(""))
 
 

@@ -25,7 +25,7 @@ from .namespace import delete_names, set_names
 class DagCommTarget:
     """Registers `jupyter-dag` on the kernel's CommManager and routes `{type: ...}` requests to handlers.
 
-    A reply is sent through ``comm.send`` while the request is being handled, so ipykernel stamps it
+    A reply is sent through `comm.send` while the request is being handled, so ipykernel stamps it
     with the request as parent and the frontend's comm future receives it: no request ids needed.
     namespace_delta is not carried here: DagKernel attaches it to every execute_reply.
     """

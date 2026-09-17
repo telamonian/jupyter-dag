@@ -1,11 +1,11 @@
 """Kernelspec installer for the jupyter-dag kernel (after ipyflow/kernel/install.py, BSD-3-Clause, Stephen Macke).
 
-Run it from the interpreter the kernel should use: like ``python -m ipykernel install``, it records that
-interpreter's ``sys.executable`` in argv, so the kernel works from a server in a different environment.
+Run it from the interpreter the kernel should use: like `python -m ipykernel install`, it records that
+interpreter's `sys.executable` in argv, so the kernel works from a server in a different environment.
 The copy shipped in the wheel (jupyter-config/kernels/jupyter-dag/kernel.json, installed by pip into
-share/jupyter/kernels) has a bare ``python`` argv[0] instead, which jupyter_client resolves to the
+share/jupyter/kernels) has a bare `python` argv[0] instead, which jupyter_client resolves to the
 *server's* interpreter (KernelManager.format_kernel_cmd), so it only works when server and kernel share an
-environment. jupyter_dag/tests/test_protocol.py checks that the shipped copy equals ``kernel_json("python")``.
+environment. jupyter_dag/tests/test_protocol.py checks that the shipped copy equals `kernel_json("python")`.
 """
 
 from __future__ import annotations

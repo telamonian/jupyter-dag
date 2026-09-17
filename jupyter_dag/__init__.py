@@ -44,7 +44,7 @@ def _load_jupyter_server_extension(server_app):
 
 
 def load_ipython_extension(ipython):
-    """Support ``%load_ext jupyter_dag`` on a stock kernel (lazy: no ipykernel import here)."""
+    """Support `%load_ext jupyter_dag` on a stock kernel (lazy: no ipykernel import here)."""
     from .kernel.kernel import load_ipython_extension as _load
 
     _load(ipython)
