@@ -1,3 +1,20 @@
+"""Static analysis of cell source: which global names a cell defines, references and deletes.
+
+This is what answers `analyze_request` (`jupyter_dag.kernel.kernel.DagKernel.analyze_request`) and
+the comm request of the same name. It is pure: nothing here reads the kernel namespace or any other
+shell state, which is what makes it safe to run on ipykernel's control thread.
+
+Cell source is not Python until IPython has rewritten it, so every cell goes through IPython's
+input transformer first (`transform_cell`) and only then through the standard library: `ast` for
+the tree and `symtable` for scope resolution. `symtable` is used because deciding whether a name in
+a function body refers to a global is exactly the compiler's job; redoing it over the AST would mean
+reimplementing Python's scoping rules.
+
+Each cell is analysed on its own, so the result is a function of that cell's source only. Builtins
+such as `print` therefore stay in `referenced`; whoever turns results into wires only draws a wire
+for a name some other cell defines, which drops them for free.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -8,12 +25,35 @@ from IPython.core.inputtransformer2 import TransformerManager
 from .protocol import AnalyzeCellInput, AnalyzedCell, AnalyzedCellOk
 
 DYNAMIC_CALLS = frozenset({"exec", "eval", "globals", "locals", "vars", "__import__", "run_cell_magic"})
-# Analysis needs no shell state, so one stateless transformer serves the shell channel, the control channel and the comm.
+"""Calls that can bind or read names static analysis cannot see; any of them sets `dynamic`."""
+
 _TRANSFORMER = TransformerManager()
+"""One stateless transformer serves the shell channel, the control channel and the comm."""
 
 
 def transform_cell(code: str) -> str:
-    """Apply IPython input transforms; fall back to raw source on failure (ipkernel.py:410-414 does the same)."""
+    """Rewrite IPython syntax into plain Python, falling back to the raw source if that fails.
+
+    Parameters
+    ----------
+    code : str
+        Cell source as the user wrote it.
+
+    Returns
+    -------
+    str
+        Python source. `%magic` lines become `get_ipython().run_line_magic(...)` calls
+        (`IPython/core/inputtransformer2.py:471`), `!cmd` becomes `get_ipython().system(...)`, and so
+        on; ordinary Python comes back unchanged.
+
+    Notes
+    -----
+    `TransformerManager.transform_cell` (`inputtransformer2.py:765`) is the same entry point
+    `InteractiveShell.run_cell` uses before compiling, minus the shell's user-registered
+    transformers, which analysis deliberately does not see. The fallback mirrors ipykernel's own
+    (`ipykernel/ipkernel.py:411-413`): if a transformer raises, the source is passed on as is and
+    the parser reports whatever is wrong with it.
+    """
     try:
         return _TRANSFORMER.transform_cell(code)
     except Exception:
@@ -21,6 +61,18 @@ def transform_cell(code: str) -> str:
 
 
 def _is_dynamic(tree: ast.Module) -> bool:
+    """Return True if the cell can change names in ways the symbol table cannot show.
+
+    Parameters
+    ----------
+    tree : ast.Module
+        The parsed cell.
+
+    Returns
+    -------
+    bool
+        True for a star import or a call to any of `DYNAMIC_CALLS`, by plain name or attribute.
+    """
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
             return True
@@ -33,11 +85,58 @@ def _is_dynamic(tree: ast.Module) -> bool:
 
 
 def _deleted_names(tree: ast.Module) -> set[str]:
+    """Return the plain names that appear as targets of `del` statements anywhere in the cell.
+
+    Parameters
+    ----------
+    tree : ast.Module
+        The parsed cell.
+
+    Returns
+    -------
+    set of str
+        Names such as `x` in `del x`; attribute and subscript targets (`del a.b`, `del d[k]`) are
+        not names and are skipped.
+    """
     return {t.id for node in ast.walk(tree) if isinstance(node, ast.Delete) for t in node.targets if isinstance(t, ast.Name)}
 
 
 def analyze_source(cell_id: str, src: str) -> AnalyzedCellOk:
-    """Analyze already-transformed Python source. Raises SyntaxError."""
+    """Analyze already-transformed Python source.
+
+    Parameters
+    ----------
+    cell_id : str
+        Echoed into the result.
+    src : str
+        Python source, normally the output of `transform_cell`.
+
+    Returns
+    -------
+    AnalyzedCellOk
+        With `status` `"ok"` and the four name lists sorted.
+
+    Raises
+    ------
+    SyntaxError
+        From `ast.parse` or `symtable.symtable` when the source does not parse.
+
+    Notes
+    -----
+    The source is parsed twice, once by `ast` and once by `symtable`, because `symtable` only
+    accepts text and the AST is still needed for `del` targets and the dynamic-call check.
+
+    At module scope a symbol counts as defined when the compiler marks it assigned or imported, and
+    as referenced when it is only read. Inside nested scopes (functions, classes, comprehensions,
+    and the annotation and type-parameter scopes newer Pythons add) a symbol matters only if it
+    reaches the module: assigned under a `global` declaration means defined, read as a global means
+    referenced; locals are the cell's own business. Names the compiler synthesises for those scopes
+    (`.format`, `.defaults`, ...) are not identifiers and are skipped.
+
+    `del x` marks `x` as assigned in the symbol table, so deleted names are taken out of `defined`
+    and reported on their own. Finally a name the cell both reads and binds is only defined, not
+    referenced: the cell does not depend on anyone else for it.
+    """
     tree = ast.parse(src)
     table = symtable.symtable(src, "<cell>", "exec")
     defined: set[str] = set()
@@ -66,9 +165,28 @@ def analyze_source(cell_id: str, src: str) -> AnalyzedCellOk:
 
 
 def analyze_cell(cell_id: str, code: str) -> AnalyzedCell:
-    """Per-cell result; a pure function of the source, so builtins stay in `referenced` (edge building drops them)."""
+    """Analyze one cell as the user wrote it; never raises.
+
+    Parameters
+    ----------
+    cell_id : str
+        Echoed into the result.
+    code : str
+        Cell source, with IPython syntax.
+
+    Returns
+    -------
+    AnalyzedCell
+        An `AnalyzedCellOk` with `status` `"ok"`, or `"opaque"` for a cell magic; an
+        `AnalyzedCellError` when the transformed source does not parse.
+
+    Notes
+    -----
+    A `%%` cell magic is reported opaque without parsing: the transformer turns the whole body into
+    one string argument of `get_ipython().run_cell_magic(...)` (`inputtransformer2.py:232`), so the
+    names inside it are invisible anyway and whether they are code at all depends on the magic.
+    """
     if code.lstrip().startswith("%%"):
-        # transform_cell collapses the body into one run_cell_magic('...') string literal
         return {"cell_id": cell_id, "status": "opaque", "defined": [], "referenced": [], "deleted": [], "dynamic": True}
     try:
         return analyze_source(cell_id, transform_cell(code))
@@ -77,4 +195,23 @@ def analyze_cell(cell_id: str, code: str) -> AnalyzedCell:
 
 
 def analyze_cells(cells: list[AnalyzeCellInput]) -> list[AnalyzedCell]:
+    """Analyze a batch of cells, one result per input in the same order.
+
+    Parameters
+    ----------
+    cells : list of AnalyzeCellInput
+        The `cells` list from an `analyze_request` or comm request.
+
+    Returns
+    -------
+    list of AnalyzedCell
+        One entry per input; a cell that fails to parse gets an error entry, the others are
+        unaffected.
+
+    Raises
+    ------
+    KeyError
+        When an input lacks `cell_id` or `code`; the request handlers turn that into an error
+        reply for the whole request, which is what a malformed request deserves.
+    """
     return [analyze_cell(c["cell_id"], c["code"]) for c in cells]

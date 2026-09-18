@@ -1,3 +1,10 @@
+"""The extension template's example REST route.
+
+The DAG view does not use HTTP routes: it talks to the kernel over the kernel websocket
+(`jupyter_dag.kernel.kernel`). This handler is kept as the template left it, as the place a
+server-side endpoint would go.
+"""
+
 import json
 
 from jupyter_server.base.handlers import APIHandler

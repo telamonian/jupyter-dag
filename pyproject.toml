@@ -102,3 +102,21 @@ before-build-python = ["jlpm clean:all"]
 
 [tool.check-wheel-contents]
 ignore = ["W002"]
+
+[tool.numpydoc_validation]
+checks = [
+    "all",
+    "ES01",  # extended summary: only where there is something to explain
+    "EX01",  # examples: only where they teach something
+    "SA01",  # see also
+]
+exclude = [
+    '\.__init__$',  # constructor parameters are documented in the class docstring
+    '^client\._analyze$',  # reqrep send-functions: `self` is the client they get bound to
+    '^client\._namespace_delete$',
+]
+exclude_files = [  # applied with re.match to the path as given, hence the leading .*
+    '.*tests/test_',
+    '.*_version\.py$',
+    '.*routes\.py$',  # the extension template's example route
+]

@@ -100,7 +100,7 @@ class DagKernel(IPythonKernel):
 
     @property
     def kernel_info(self) -> dict[str, Any]:
-        """dict: the `kernel_info_reply` content, with the jupyter-dag feature strings appended.
+        """The `kernel_info_reply` content, with the jupyter-dag feature strings appended.
 
         `Kernel.kernel_info` (`ipykernel/kernelbase.py:992-1008`) is a plain property that
         assembles the reply and fills `supported_features` from hard-coded checks ("kernel
@@ -108,6 +108,12 @@ class DagKernel(IPythonKernel):
         the property and extending its result is the only way to advertise more features. The
         strings follow ipykernel's spelling convention, lower case and space separated:
         `jupyter_dag.protocol.ALL_FEATURES`.
+
+        Returns
+        -------
+        dict
+            The base reply with `"cell analysis"`, `"namespace delete"`, `"namespace set"` and
+            `"namespace delta"` added to `supported_features`.
         """
         info = super().kernel_info
         info["supported_features"].extend(ALL_FEATURES)
@@ -118,10 +124,12 @@ class DagKernel(IPythonKernel):
 
         Parameters
         ----------
-        stream
-            The ZMQ stream the request came in on (shell or control).
-        ident
-            ZMQ identities of the requesting client, passed through to the reply.
+        stream : zmq.eventloop.zmqstream.ZMQStream
+            The stream the request came in on: `shell_stream` or `control_stream`
+            (`kernelbase.py:111`, `:152`).
+        ident : list of bytes
+            ZMQ routing identities of the requesting client, as split off by
+            `Session.feed_identities` (`kernelbase.py:354`); passed through to the reply.
         parent : dict
             The `analyze_request` message; `parent["content"]["cells"]` is a list of
             `{"cell_id", "code"}` dicts (`jupyter_dag.protocol.AnalyzeCellInput`).

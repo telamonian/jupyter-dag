@@ -1,3 +1,9 @@
+"""Unit tests for `jupyter_dag.analysis`: what a cell defines, references and deletes.
+
+These run without a kernel. Not covered: user-registered input transformers (analysis
+deliberately uses a private transformer) and the frontend's use of the results.
+"""
+
 import pytest
 from jupyter_dag.analysis import analyze_cell, analyze_cells
 

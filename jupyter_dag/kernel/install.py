@@ -1,11 +1,17 @@
-"""Kernelspec installer for the jupyter-dag kernel (after ipyflow/kernel/install.py, BSD-3-Clause, Stephen Macke).
+"""Kernelspec installer for the jupyter-dag kernel, after ipyflow's `kernel/install.py` (BSD-3-Clause, Stephen Macke).
 
-Run it from the interpreter the kernel should use: like `python -m ipykernel install`, it records that
-interpreter's `sys.executable` in argv, so the kernel works from a server in a different environment.
-The copy shipped in the wheel (jupyter-config/kernels/jupyter-dag/kernel.json, installed by pip into
-share/jupyter/kernels) has a bare `python` argv[0] instead, which jupyter_client resolves to the
-*server's* interpreter (KernelManager.format_kernel_cmd), so it only works when server and kernel share an
-environment. jupyter_dag/tests/test_protocol.py checks that the shipped copy equals `kernel_json("python")`.
+A kernelspec is a directory with a `kernel.json` whose `argv` tells jupyter_client how to start the
+kernel. Ours starts the stock `ipykernel_launcher` and points `IPKernelApp.kernel_class` at
+`DagKernel`, so there is no launcher module to write; everything else comes from ipykernel's own
+kernelspec helpers.
+
+Run the installer from the interpreter the kernel should use: like `python -m ipykernel install`,
+it records that interpreter's `sys.executable` in `argv`, so the kernel works from a server in a
+different environment. The copy shipped in the wheel (`jupyter-config/kernels/jupyter-dag/kernel.json`,
+which pip installs into `share/jupyter/kernels`) has a bare `python` as `argv[0]` instead.
+jupyter_client replaces that with the *server's* interpreter (`jupyter_client/manager.py:396-402`),
+so the shipped copy only works when server and kernel share an environment.
+`jupyter_dag/tests/test_protocol.py` checks that it equals `kernel_json("python")`.
 """
 
 from __future__ import annotations
@@ -27,10 +33,31 @@ KERNEL_CLASS = "jupyter_dag.kernel.kernel.DagKernel"
 
 
 def kernel_json(executable: str | None = None) -> dict[str, Any]:
-    """The kernel.json contents; argv[0] is `executable`, by default the running interpreter."""
+    """Build the `kernel.json` contents.
+
+    Parameters
+    ----------
+    executable : str, optional
+        What to put in `argv[0]`. By default the running interpreter, which is the point of
+        running the installer from the right environment; `"python"` reproduces the shipped copy.
+
+    Returns
+    -------
+    dict
+        `argv`, `display_name`, `language`, `metadata` and `kernel_protocol_version`.
+
+    Notes
+    -----
+    `get_kernel_dict` (`ipykernel/kernelspec.py:59-72`) is what ipykernel writes for its own
+    `python3` spec: `argv` from `make_ipkernel_cmd` (`kernelspec.py:31`), which uses
+    `sys.executable` unless told otherwise, plus the debugger and encryption metadata. Two
+    arguments are added: `--IPKernelApp.kernel_class=...` selects this kernel, and
+    `-Xfrozen_modules=off` keeps debugpy usable, which ipykernel's installer also adds by default
+    (`kernelspec.py:178-180`).
+    """
     spec = get_kernel_dict(
         extra_arguments=[f"--IPKernelApp.kernel_class={KERNEL_CLASS}"],
-        python_arguments=["-Xfrozen_modules=off"],  # keeps debugpy usable, as ipykernel's installer does
+        python_arguments=["-Xfrozen_modules=off"],
     )
     if executable is not None:
         spec["argv"][0] = executable
@@ -39,12 +66,51 @@ def kernel_json(executable: str | None = None) -> dict[str, Any]:
 
 
 def write_kernel_spec(directory: Path | str | None = None, executable: str | None = None) -> str:
-    """Write kernel.json plus ipykernel's logos into `directory` (a fresh temporary one by default); returns it."""
+    """Write a kernelspec directory: `kernel.json` plus ipykernel's logo files.
+
+    Parameters
+    ----------
+    directory : Path or str, optional
+        Where to write; must not exist yet. By default a fresh temporary directory.
+    executable : str, optional
+        Passed to `kernel_json`.
+
+    Returns
+    -------
+    str
+        The directory written.
+
+    Notes
+    -----
+    Wraps ipykernel's `write_kernel_spec` (`ipykernel/kernelspec.py:74`), which copies its
+    resource directory (the logos) and writes `kernel.json` with the given overrides applied on top
+    of its own spec; here the overrides are the whole of `kernel_json`.
+    """
     return _write_ipykernel_spec(directory, overrides=kernel_json(executable))
 
 
 def install(user: bool = False, prefix: str | None = None) -> str:
-    """Install the kernelspec through jupyter_client; returns the destination directory."""
+    """Install the kernelspec where jupyter_client will find it.
+
+    Parameters
+    ----------
+    user : bool, default False
+        Install into the per-user kernels directory.
+    prefix : str, optional
+        Install under `<prefix>/share/jupyter/kernels` instead; `sys.prefix` targets the current
+        environment. With neither, the install is system-wide and normally needs root.
+
+    Returns
+    -------
+    str
+        The directory the spec was installed into.
+
+    Notes
+    -----
+    The spec is written to a temporary directory and handed to
+    `KernelSpecManager.install_kernel_spec` (`jupyter_client/kernelspec.py:360`), which copies it
+    under the chosen location as `jupyter-dag`, the same way `jupyter kernelspec install` does.
+    """
     staged = write_kernel_spec()
     try:
         return KernelSpecManager().install_kernel_spec(staged, kernel_name=KERNEL_NAME, user=user, prefix=prefix)
@@ -53,13 +119,38 @@ def install(user: bool = False, prefix: str | None = None) -> str:
 
 
 def _is_root() -> bool:
+    """Return True when running as root, so the default install can go system-wide.
+
+    Returns
+    -------
+    bool
+        False on platforms without `os.geteuid`, which are treated as non-admin.
+    """
     try:
         return os.geteuid() == 0
     except AttributeError:
-        return False  # not an admin on non-Unix platforms
+        return False
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Command-line entry point: `jupyter-dag-kernel` or `python -m jupyter_dag.kernel.install`.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Arguments to parse instead of `sys.argv[1:]`: one of `--user`, `--sys-prefix`,
+        `--prefix PREFIX`, or nothing.
+
+    Returns
+    -------
+    int
+        Process exit status, always 0; errors raise.
+
+    Notes
+    -----
+    With no option the spec goes to the user directory unless the process is root, in which case
+    it goes system-wide; this is ipyflow's default and matches `python -m ipykernel install`.
+    """
     parser = argparse.ArgumentParser(
         prog="jupyter-dag-kernel",
         description=f"Install the {KERNEL_NAME} kernelspec for this interpreter ({sys.executable}).",
