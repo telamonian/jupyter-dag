@@ -1,18 +1,17 @@
 """Static analysis of cell source: which global names a cell defines, references and deletes.
 
 This is what answers `analyze_request` (`jupyter_dag.kernel.kernel.DagKernel.analyze_request`) and
-the comm request of the same name. It is pure: nothing here reads the kernel namespace or any other
-shell state, which is what makes it safe to run on ipykernel's control thread.
+the comm request of the same name. Nothing here reads the kernel namespace or any other shell
+state, so it is safe to run on ipykernel's control thread.
 
 Cell source is not Python until IPython has rewritten it, so every cell goes through IPython's
 input transformer first (`transform_cell`) and only then through the standard library: `ast` for
-the tree and `symtable` for scope resolution. `symtable` is used because deciding whether a name in
-a function body refers to a global is exactly the compiler's job; redoing it over the AST would mean
-reimplementing Python's scoping rules.
+the tree and `symtable` for scope resolution. `symtable` resolves scopes because deciding whether
+a name in a function body refers to a global is the compiler's job; redoing it over the AST would
+mean reimplementing Python's scoping rules.
 
-Each cell is analysed on its own, so the result is a function of that cell's source only. Builtins
-such as `print` therefore stay in `referenced`; whoever turns results into wires only draws a wire
-for a name some other cell defines, which drops them for free.
+Each cell is analysed on its own, so builtins such as `print` stay in `referenced`; whoever turns
+results into wires only draws one for a name another cell defines, which drops them for free.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ DYNAMIC_CALLS = frozenset({"exec", "eval", "globals", "locals", "vars", "__impor
 """Calls that can bind or read names static analysis cannot see; any of them sets `dynamic`."""
 
 _TRANSFORMER = TransformerManager()
-"""One stateless transformer serves the shell channel, the control channel and the comm."""
+"""Stateless; shared by every caller."""
 
 
 def transform_cell(code: str) -> str:
@@ -43,16 +42,16 @@ def transform_cell(code: str) -> str:
     -------
     str
         Python source. `%magic` lines become `get_ipython().run_line_magic(...)` calls
-        (`IPython/core/inputtransformer2.py:471`), `!cmd` becomes `get_ipython().system(...)`, and so
-        on; ordinary Python comes back unchanged.
+        (`IPython/core/inputtransformer2.py:501`, and `:376` for the `x = %magic` form), `!cmd`
+        becomes `get_ipython().system(...)`, and so on; ordinary Python comes back unchanged.
 
     Notes
     -----
     `TransformerManager.transform_cell` (`inputtransformer2.py:765`) is the same entry point
     `InteractiveShell.run_cell` uses before compiling, minus the shell's user-registered
-    transformers, which analysis deliberately does not see. The fallback mirrors ipykernel's own
-    (`ipykernel/ipkernel.py:411-413`): if a transformer raises, the source is passed on as is and
-    the parser reports whatever is wrong with it.
+    transformers, which analysis does not see. The fallback mirrors ipykernel's own
+    (`ipykernel/ipkernel.py:411-413`): when a transformer raises, the raw source goes to the
+    parser, which reports whatever is wrong with it.
     """
     try:
         return _TRANSFORMER.transform_cell(code)
@@ -123,9 +122,6 @@ def analyze_source(cell_id: str, src: str) -> AnalyzedCellOk:
 
     Notes
     -----
-    The source is parsed twice, once by `ast` and once by `symtable`, because `symtable` only
-    accepts text and the AST is still needed for `del` targets and the dynamic-call check.
-
     At module scope a symbol counts as defined when the compiler marks it assigned or imported, and
     as referenced when it is only read. Inside nested scopes (functions, classes, comprehensions,
     and the annotation and type-parameter scopes newer Pythons add) a symbol matters only if it
@@ -133,9 +129,11 @@ def analyze_source(cell_id: str, src: str) -> AnalyzedCellOk:
     referenced; locals are the cell's own business. Names the compiler synthesises for those scopes
     (`.format`, `.defaults`, ...) are not identifiers and are skipped.
 
-    `del x` marks `x` as assigned in the symbol table, so deleted names are taken out of `defined`
-    and reported on their own. Finally a name the cell both reads and binds is only defined, not
-    referenced: the cell does not depend on anyone else for it.
+    `del x` is assigned in the symbol table, so deleted names are reported separately; a name the
+    cell both reads and binds is only `defined`.
+
+    The source is parsed twice, once by `ast` and once by `symtable`, because `symtable` only
+    accepts text and the AST is still needed for `del` targets and the dynamic-call check.
     """
     tree = ast.parse(src)
     table = symtable.symtable(src, "<cell>", "exec")

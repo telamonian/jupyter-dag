@@ -17,7 +17,7 @@ from ..protocol import NamespaceDelta
 
 
 def visible_names(shell: InteractiveShell) -> set[str]:
-    """Return the user-visible global names, exactly as `%who_ls` reports them.
+    """Return the user-visible global names, as `%who_ls` reports them.
 
     Parameters
     ----------
@@ -76,7 +76,7 @@ def delete_names(shell: InteractiveShell, names: Iterable[str]) -> list[str]:
 
 
 def set_names(shell: InteractiveShell, values: Mapping[str, Any]) -> list[str]:
-    """Bind JSON values as user-namespace names; the "inputs" half of the design.
+    """Bind JSON values as user-namespace names, for parameters a frontend sets before a run.
 
     Parameters
     ----------
@@ -117,7 +117,7 @@ def compute_delta(before: set[str], after: set[str]) -> NamespaceDelta:
 
     Notes
     -----
-    A set difference cannot see a name rebound to a new value: `x = 1` after `x = 0` yields an
-    empty delta. Staleness from rebinding is the frontend's job, through the analysis results.
+    A rebinding to a new value is invisible to a set difference (`x = 1` after `x = 0` yields an
+    empty delta); staleness from rebinding is the frontend's job, through the analysis results.
     """
     return {"added": sorted(after - before), "removed": sorted(before - after)}

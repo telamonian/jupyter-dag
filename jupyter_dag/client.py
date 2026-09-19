@@ -5,7 +5,9 @@
 `msg_id`, and wraps it into a method with `reply` and `timeout` keyword arguments that can also
 wait for the reply. `wrapped` (`jupyter_client/blocking/client.py:19`) is the blocking flavour of
 that waiter. The two functions below are such send-functions; the class attaches them the way
-`BlockingKernelClient` attaches its own.
+`BlockingKernelClient` attaches its own. `reqrep` builds the wrapped method's documentation by
+splitting the send-function's docstring at its `Returns` section, so that section stays last in
+both.
 """
 
 from __future__ import annotations
@@ -21,9 +23,7 @@ from .protocol import ANALYZE_REQUEST, KERNEL_NAME, AnalyzeCellInput
 def _analyze(self: KernelClient, cells: list[AnalyzeCellInput]) -> str:
     """Send an `analyze_request` on the shell channel.
 
-    Modelled on `KernelClient.is_complete` (`jupyter_client/client.py:807`). `reqrep` splits this
-    docstring at its `Returns` section to build the wrapped method's documentation, so that section
-    must stay last.
+    Modelled on `KernelClient.is_complete` (`jupyter_client/client.py:807`).
 
     Parameters
     ----------
@@ -45,8 +45,7 @@ def _namespace_delete(self: KernelClient, names: list[str]) -> str:
 
     `KernelClient.execute` builds its content from a fixed set of arguments
     (`jupyter_client/client.py:662-669`) with no way to add a field, so the message is built by
-    hand. Only the fields the kernel reads are sent; ipykernel defaults the rest. `reqrep` splits
-    this docstring at its `Returns` section, which must stay last.
+    hand. Only the fields the kernel reads are sent; ipykernel defaults the rest.
 
     Parameters
     ----------

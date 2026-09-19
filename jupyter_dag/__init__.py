@@ -1,10 +1,17 @@
-"""The jupyter_dag package: three discovery hooks and nothing else at import time.
+"""The jupyter-dag package: a DAG view over the notebook, backed by small additions to the kernel protocol.
 
-Three different hosts import this package and look for a function by name. JupyterLab's extension
-tooling calls `_jupyter_labextension_paths` to find the built frontend. jupyter_server calls
+The Python side is the kernel half. `protocol` holds the wire format; `analysis` and
+`kernel.namespace` are the pure mechanisms (which names a cell defines and references, and the
+namespace operations); `kernel.kernel` and `kernel.comm` are the two transports that expose them,
+a message type of its own and a comm target; `kernel.install`, `provisioner`, `client` and
+`routes` are packaging, tooling and the extension template's leftovers.
+
+This module itself is three discovery hooks and nothing else at import time. Three different hosts
+import the package and look for a function by name. JupyterLab's extension tooling calls
+`_jupyter_labextension_paths` to find the built frontend. jupyter_server calls
 `_jupyter_server_extension_points` and then `_load_jupyter_server_extension`
 (`jupyter_server/extension/utils.py:54-76` and `:25-32`). IPython's `%load_ext jupyter_dag` calls
-`load_ipython_extension` (`IPython/core/extensions.py:53`). The server never needs ipykernel and
+`load_ipython_extension` (`IPython/core/extensions.py:128`). The server never needs ipykernel and
 the kernel never needs the server, so everything heavier than these shims is imported inside the
 function that needs it.
 """

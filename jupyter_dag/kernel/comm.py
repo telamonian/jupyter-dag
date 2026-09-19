@@ -7,13 +7,15 @@ and the message (`comm/base_comm.py:263-281`). Each later `comm_msg` on that com
 `BaseComm.handle_msg` (`base_comm.py:179`), which calls whatever `on_msg` registered. Anything the
 kernel sends with `comm.send` goes out as a `comm_msg` on iopub.
 
-That last point is what makes request-reply work without request ids: ipykernel's `publish_msg`
+Request-reply therefore needs no request ids: ipykernel's `publish_msg`
 (`ipykernel/comm/comm.py:24-42`) sends on iopub with `parent=self.kernel.get_parent()`, the
 message being handled right now. A reply sent from inside the handler therefore carries the
 request's header as its parent, and the frontend future for that request receives it.
 
-The dispatch skeleton follows ipyflow's `comm_manager.py` (BSD-3-Clause, Stephen Macke); ipyflow's
-handler that `exec()`s comm-supplied source is deliberately omitted.
+References
+----------
+The dispatch skeleton follows ipyflow's `comm_manager.py` (BSD-3-Clause, Stephen Macke); its
+handler that `exec()`s comm-supplied source has no twin here.
 """
 
 from __future__ import annotations
@@ -43,12 +45,12 @@ class DagCommTarget:
         The kernel's comm manager (`IPythonKernel.comm_manager`); the target is registered on it
         with `register_target` (`comm/base_comm.py:202`).
     shell : InteractiveShell
-        The kernel's shell, for the namespace handlers. Analysis needs no shell.
+        The kernel's shell, for the namespace handlers.
 
     Notes
     -----
-    `namespace_delta` is not carried here: `DagKernel.do_execute` attaches it to every
-    `execute_reply`, which every connected client receives.
+    `namespace_delta` is not carried here; `DagKernel.do_execute` attaches it to every
+    `execute_reply`.
     """
 
     def __init__(self, comm_manager: CommManager, shell: InteractiveShell) -> None:
@@ -73,9 +75,9 @@ class DagCommTarget:
 
         Notes
         -----
-        The `features` message exists for a stock kernel that loaded the extension at runtime:
-        its `kernel_info_reply` went out before `%load_ext`, so the frontend never saw the feature
-        strings there and reads them from here instead.
+        The `features` message is how the frontend learns the feature strings after `%load_ext`
+        on a stock kernel, whose `kernel_info_reply` had already gone out
+        (`jupyter_dag.kernel.kernel.load_ipython_extension`).
         """
         comm.on_msg(lambda msg: self._on_msg(comm, msg))
         comm.send({"type": "features", "supported_features": list(ALL_FEATURES)})
@@ -94,7 +96,7 @@ class DagCommTarget:
         -----
         The reply is `{"status": "ok", ...handler result...}`, or `error_content` of whatever the
         handler raised; an unknown `type` is a `KeyError` on the handler table and takes the same
-        path. The frontend checks `status` only.
+        path.
         """
         request: CommRequest = msg["content"]["data"]
         try:
