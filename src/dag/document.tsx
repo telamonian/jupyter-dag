@@ -54,13 +54,12 @@ export const dagIcon = new LabIcon({
  * `context.isReady` (`@jupyterlab/docregistry/src/registry.ts:970`) and the constructor requests a
  * re-render when `context.ready` resolves.
  *
- * Bootstrap order. The kernel client detects features on kernel start, change and restart, and
- * the panel re-analyses the notebook after every detection (`featuresChanged`). One explicit
- * detection at construction covers a kernel that is already running, which is the case when a
- * DAG view is opened next to a notebook panel that started it. Mime types are set the same way
- * the notebook panel sets them: from `kernel.info`'s `language_info`, on every kernel change
- * (`NotebookPanel._onKernelChanged`, `@jupyterlab/notebook/src/panel.ts:193-206`, and
- * `StaticNotebook._updateMimetype`, `@jupyterlab/notebook/src/widget.ts:871`).
+ * Bootstrap order. The panel re-analyses the notebook on every `featuresChanged` of the kernel
+ * client. One explicit detection at construction covers a kernel that is already running, which
+ * is the case when a DAG view is opened next to a notebook panel that started it. Mime types are
+ * set the same way the notebook panel sets them: from `kernel.info`'s `language_info`, on every
+ * kernel change (`NotebookPanel._onKernelChanged`, `@jupyterlab/notebook/src/panel.ts:193-206`,
+ * and `StaticNotebook._updateMimetype`, `@jupyterlab/notebook/src/widget.ts:871`).
  */
 export class DagPanel extends ReactWidget {
   /**
@@ -127,10 +126,9 @@ export class DagPanel extends ReactWidget {
    * notebook panel open).
    *
    * @remarks
-   * `runCell` drives a widget, not a model. Nodes register their `Cell` widgets as they mount;
-   * with `outputOnlyNodes` on there is none, so the notebook panel on the same context
-   * (`INotebookTracker.find`, `@jupyterlab/apputils/src/widgettracker.ts:266`) supplies its
-   * widget for the cell instead.
+   * Nodes register their `Cell` widgets as they mount; with `outputOnlyNodes` on there is none, so
+   * the notebook panel on the same context (`INotebookTracker.find`,
+   * `@jupyterlab/apputils/src/widgettracker.ts:266`) supplies its widget for the cell instead.
    */
   cellWidget(cellId: string): Cell | undefined {
     const own = this._widgets.get(cellId);
@@ -260,7 +258,8 @@ export namespace DagDocument {
  * widget-factory contract: `createNew` (`default.ts:465`) calls `createNewWidget`, applies the
  * toolbar factory (`default.ts:472`) and emits `widgetCreated` (`default.ts:476`), which the plugin
  * uses to add the widget to its tracker. `modelName` is passed as `'notebook'` on every
- * construction and is load-bearing: see the module comment.
+ * construction, which is what makes the document manager hand back the notebook panel's existing
+ * context and model instead of a fresh one (see the module comment).
  *
  * The rendermime is cloned per document with the context's URL resolver, exactly as
  * `NotebookWidgetFactory` does (`@jupyterlab/notebook/src/widgetfactory.ts:91`), so relative

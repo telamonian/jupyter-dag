@@ -2,9 +2,8 @@
  * Automatic layout of the DAG canvas with dagre.
  *
  * dagre lays out a directed graph in ranks: sources at the top (or left), each edge pointing to a
- * later rank, nodes within a rank spread apart. Only the nodes that have wires take part; the
- * rest are stacked in a column beside the graph, after marimo's precedent for cells that are not
- * connected to anything.
+ * later rank, nodes within a rank spread apart. Nodes without wires are stacked in a column beside
+ * the graph, after marimo's precedent for cells that are not connected to anything.
  *
  * @see https://github.com/dagrejs/dagre/wiki for dagre's graph API and layout options.
  * @module
@@ -35,17 +34,14 @@ const FALLBACK = { width: 360, height: 140 };
  * array is not modified.
  *
  * @remarks
- * How dagre is driven. A `graphlib.Graph` gets its layout options through `setGraph`
- * (`rankdir` is the direction; `nodesep`, `ranksep` and `edgesep` are the gaps in pixels), nodes
- * through `setNode(id, { width, height })` and edges through `setEdge(source, target)`; `layout`
- * then writes `x` and `y` onto each node label. Those coordinates are the node's centre, while a
- * React Flow node's `position` is its top-left corner, hence the half-size subtraction.
+ * dagre writes each node's centre as `x` and `y` onto its label, while a React Flow node's
+ * `position` is its top-left corner, hence the half-size subtraction; `nodesep`, `ranksep` and
+ * `edgesep` are in pixels.
  *
- * Two dagre details the code guards against. With no nodes at all, `g.graph().width` after
- * `layout` is `-Infinity` (the built package folds the bounds over an empty list), so
- * `Number.isFinite`, not `??`, decides whether there is a graph to place the side column next to.
- * And a node with no wires is left out of the dagre graph on purpose: dagre would otherwise give
- * every isolated node its own rank and stretch the drawing.
+ * With no nodes at all, `g.graph().width` after `layout` is `-Infinity` (the built package folds
+ * the bounds over an empty list), so `Number.isFinite`, not `??`, decides whether there is a graph
+ * to place the side column next to. A node with no wires is left out of the dagre graph on
+ * purpose: dagre would otherwise give every isolated node its own rank and stretch the drawing.
  *
  * `sourcePosition` and `targetPosition` tell React Flow which side of a node an edge leaves from
  * and arrives at (`Position.Bottom` to `Position.Top` for a top-to-bottom layout); they have to

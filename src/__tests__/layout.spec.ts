@@ -1,9 +1,6 @@
 /**
- * Unit tests for `dag/layout.ts` and `readCellMetadata`.
- *
- * The layout tests pin the two dagre edge cases the code guards against (an empty dagre graph
- * still gives every node a finite position; rank order follows the wires); the metadata test pins
- * that non-finite numbers are dropped on the way in.
+ * Unit tests for `dag/layout.ts` (the two dagre edge cases the layout code guards against) and
+ * `readCellMetadata`.
  */
 import { layoutElements } from '../dag/layout';
 import { readCellMetadata } from '../dag/tokens';

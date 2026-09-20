@@ -61,9 +61,9 @@ export function getCellMetadata(cell: ICellModel): IDagCellMetadata {
  *
  * @remarks
  * Metadata values are stored whole under their key, so a change to one field is a read, merge and
- * write of the object. Two properties of the setter matter here. `CellModel.setMetadata`
- * (`@jupyterlab/cells/src/model.ts:361-367`) deletes the key when the value is `undefined`, which
- * is why the whole object is always passed. And `YBaseCell.setMetadata`
+ * write of the object. `CellModel.setMetadata` (`@jupyterlab/cells/src/model.ts:361-367`) deletes
+ * the key when the value is `undefined`, which is why the whole object is always passed.
+ * `YBaseCell.setMetadata`
  * (`@jupyter/ydoc/src/ycell.ts:522-524`) compares the new value with `JSONExt.deepEqual` and
  * returns without writing when nothing changed, so writing an unchanged object emits no
  * `metadataChanged`. Each write is its own Yjs transaction (`ycell.ts:526`) unless a caller wraps
@@ -103,8 +103,7 @@ export function updateNotebookMetadata(model: INotebookModel, patch: Partial<IDa
  *
  * @remarks
  * An `inputs` entry that names a deleted cell is ignored, not rewritten: undoing the deletion
- * brings the cell back with its id, and the wire with it. The cost is one metadata read per cell;
- * {@link DagGraphModel.wires} caches the result.
+ * brings the cell back with its id, and the wire with it. The cost is one metadata read per cell.
  */
 export function collectWires(model: INotebookModel): IWire[] {
   const ids = new Set(Array.from(model.cells, c => c.id));
@@ -221,8 +220,8 @@ export function upstreamOf(start: Iterable<string>, wires: IWire[], inclusive: b
  * @returns True when `target` already reaches `source` (or the two are the same cell).
  *
  * @remarks
- * The canvas calls this from React Flow's `isValidConnection` on every pointer move while a wire
- * is being dragged, which is why {@link DagGraphModel.wires} is cached.
+ * A forward walk from `target`, so the cost is linear in the wires; a caller that runs it per
+ * pointer move should read them from {@link DagGraphModel.wires}, which caches them.
  */
 export function wouldCreateCycle(wires: IWire[], source: string, target: string): boolean {
   return source === target || downstreamOf([target], wires, true).has(source);
@@ -237,8 +236,7 @@ export function wouldCreateCycle(wires: IWire[], source: string, target: string)
  * document order wins.
  *
  * @remarks
- * Kahn's algorithm: repeatedly emit a cell with no unemitted upstream cells, then decrement the
- * in-degree of its targets. Re-sorting the ready list by document rank after each step is what
+ * Kahn's algorithm, with the ready list re-sorted by document rank after each step, which is what
  * makes the result deterministic and notebook-like. `topologicSort` from `@lumino/algorithm`
  * (`@lumino/algorithm/src/sort.ts:37`) is not used because it takes only edges, so cells without
  * wires would drop out, and it has no tie-break. A cycle cannot occur (see {@link addWire}); if
@@ -284,9 +282,8 @@ export function topologicalOrder(cellIds: string[], wires: IWire[]): string[] {
  * source, which marks the cell stale; `ICellModel.contentChanged` is not used for that because it
  * also fires when outputs are written, which would mark a cell stale as it runs.
  *
- * Wires and cell ids are always read from the notebook (with `wires` cached until a change
- * invalidates it), and the class writes nothing back to the document; the state map is the only
- * thing it owns, and it is not persisted.
+ * The class writes nothing back to the document; the state map is the only thing it owns, and it
+ * is not persisted.
  */
 export class DagGraphModel implements IDagGraphModel, IDisposable {
   /**
@@ -317,8 +314,9 @@ export class DagGraphModel implements IDagGraphModel, IDisposable {
    * Every wire whose source and target both exist.
    *
    * @remarks
-   * Cached, because the canvas reads it on every pointer move while a wire is being dragged; the
-   * cache is dropped when the cell list changes or a cell's `inputs` change.
+   * React Flow calls the canvas's connection validation on every pointer move while a wire is
+   * being dragged, and that check walks the wires, so the list is cached; the cache is dropped
+   * when the cell list changes or a cell's `inputs` change.
    */
   get wires(): IWire[] {
     return (this._wires ??= collectWires(this.notebook));
