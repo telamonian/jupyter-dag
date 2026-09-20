@@ -4,6 +4,7 @@ import tseslint from 'typescript-eslint';
 import prettierRecommended from 'eslint-plugin-prettier/recommended';
 import globals from 'globals';
 import jupyterPlugin from '@jupyter/eslint-plugin';
+import tsdocPlugin from 'eslint-plugin-tsdoc';
 
 export default defineConfig([
   {
@@ -16,7 +17,8 @@ export default defineConfig([
       '.venv',
       'tests',
       '**/__tests__',
-      'ui-tests'
+      'ui-tests',
+      '.history'
     ]
   },
   js.configs.recommended,
@@ -29,6 +31,9 @@ export default defineConfig([
   jupyterPlugin.configs.recommended,
   {
     files: ['**/*.ts', '**/*.tsx'],
+    plugins: {
+      tsdoc: tsdocPlugin
+    },
     languageOptions: {
       globals: {
         ...globals.browser,
@@ -63,7 +68,8 @@ export default defineConfig([
       ],
       curly: ['error', 'all'],
       eqeqeq: 'error',
-      'prefer-arrow-callback': 'error'
+      'prefer-arrow-callback': 'error',
+      'tsdoc/syntax': 'warn'
     }
   },
   prettierRecommended

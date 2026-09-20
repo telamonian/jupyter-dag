@@ -134,3 +134,6 @@ dmypy.json
 
 # Jest junit reporter output
 junit.xml
+
+# TypeDoc output (jlpm docs)
+docs/api/
