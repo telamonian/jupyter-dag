@@ -62,7 +62,7 @@ export interface IAnalyzeRequestContent {
  *
  * @remarks
  * The kernel derives the four name lists in `jupyter_dag/analysis.py` (`analyze_source`); this is
- * its `AnalyzedCellOk` TypedDict. Only `defined` is consumed today, by {@link DagExecutor}'s purge.
+ * its `AnalyzedCellOk` TypedDict. Only `defined` is consumed today, by `DagExecutor`'s purge.
  */
 export interface IAnalyzedCellOk {
   /** The id from the matching {@link IAnalyzeCellInput}. */
@@ -204,7 +204,7 @@ type ControlStandIn = KernelMessage.IDebugRequestMsg;
  * Which channel. The control channel is the design's choice, because analysis needs no access to
  * the namespace and the control thread is free while a cell runs; the shell channel is the
  * default here because control messages hold ipykernel's control lock for the whole batch. The
- * `analyzeChannel` setting switches between them ({@link IDagSettings}).
+ * `analyzeChannel` setting switches between them (`IDagSettings` in `tokens.ts`).
  *
  * Why every message carries `subshellId`. The connection may be attached to a subshell (JEP 91);
  * `Kernel.IKernelConnection.subshellId` (`@jupyterlab/services/src/kernel/kernel.ts:622`,

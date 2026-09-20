@@ -1,3 +1,9 @@
+/**
+ * Unit tests for the pure graph algorithms in `dag/wiring.ts`: ordering, cycle detection, closures.
+ *
+ * They run on plain wire lists without a notebook model. Not covered: `DagGraphModel`'s signal
+ * fan-in and the metadata helpers, which need a shared model (a Lab-side test would).
+ */
 import { downstreamOf, topologicalOrder, upstreamOf, wouldCreateCycle } from '../dag/wiring';
 import type { IWire } from '../dag/tokens';
 
