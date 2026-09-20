@@ -81,3 +81,25 @@ The `AGENTS.md` file provides guidance on:
 You can edit `AGENTS.md` to add project-specific conventions or adjust guidelines to match your team's practices. The file uses plain Markdown with Do/Don't patterns and references to actual project files.
 
 **Note**: `AGENTS.md` is living documentation. Update it when you change conventions, add dependencies, or discover new patterns. Include `AGENTS.md` updates in commits that modify workflows or coding standards.
+
+## Kernel
+
+The DAG view talks to a kernel that understands `analyze_request`, `namespace_delete` and
+`namespace_delta` (advertised through `supported_features`). Three ways to get one:
+
+- the kernelspec `Python 3 (jupyter-dag)` installed with the wheel (`jupyter kernelspec list`); its argv
+  starts with a bare `python`, which jupyter_client resolves to the server's interpreter, so it only works
+  when the server and the kernel share an environment;
+- `jupyter-dag-kernel --sys-prefix` (or `python -m jupyter_dag.kernel.install`), run from the interpreter
+  the kernel should use: like `python -m ipykernel install`, it records that interpreter;
+- `%load_ext jupyter_dag` inside a stock Python kernel, which adds the handlers and comm target to the
+  running kernel; the frontend uses the comm transport until the kernel is restarted.
+
+Deployments that restrict `c.MappingKernelManager.allowed_message_types` must include
+`analyze_request`.
+
+## Attribution
+
+The DAG canvas is built on [React Flow](https://reactflow.dev) (MIT). Parts of the kernel-side
+comm dispatch and kernelspec installer follow [ipyflow](https://github.com/ipyflow/ipyflow)
+(BSD-3-Clause, Stephen Macke); see the attribution comments in `jupyter_dag/kernel/`.

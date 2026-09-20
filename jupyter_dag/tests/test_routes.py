@@ -1,3 +1,6 @@
+"""The extension template's test of its example REST route.
+"""
+
 import json
 
 

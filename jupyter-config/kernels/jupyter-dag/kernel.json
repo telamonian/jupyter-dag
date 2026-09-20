@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "python",
+    "-Xfrozen_modules=off",
+    "-m",
+    "ipykernel_launcher",
+    "-f",
+    "{connection_file}",
+    "--IPKernelApp.kernel_class=jupyter_dag.kernel.kernel.DagKernel"
+  ],
+  "display_name": "Python 3 (jupyter-dag)",
+  "language": "python",
+  "metadata": {
+    "debugger": true,
+    "supported_encryption": "curve"
+  },
+  "kernel_protocol_version": "5.5"
+}

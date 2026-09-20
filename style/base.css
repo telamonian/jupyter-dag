@@ -3,3 +3,51 @@
 
     https://jupyterlab.readthedocs.io/en/stable/developer/css.html
 */
+
+/* DAG document view (src/dag/document.tsx, canvas.tsx, cellnode.tsx) */
+.jp-DagPanel,
+.jp-DagPanel .react-flow {
+  height: 100%;
+}
+
+.jp-DagCellNode {
+  min-width: 240px;
+  background: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+}
+
+.jp-DagCellNode-stale {
+  border-color: var(--jp-warn-color1);
+}
+
+.jp-DagCellNode-queued {
+  border-color: var(--jp-info-color1);
+}
+
+.jp-DagCellNode-error {
+  border-color: var(--jp-error-color1);
+}
+
+.jp-DagCellNode-dragHandle {
+  height: 8px;
+  cursor: grab;
+  background: var(--jp-layout-color2);
+}
+
+.jp-DagCellNode-host {
+  overflow: visible;
+}
+
+.jp-DagCellNode-port {
+  background: var(--jp-brand-color1);
+}
+
+/* React Flow puts the edge className on the <g>; the path is its child. */
+.jp-DagWire .react-flow__edge-path {
+  stroke: var(--jp-border-color1);
+}
+
+.jp-DagPanel .jp-DagWire.selected .react-flow__edge-path {
+  stroke: var(--jp-brand-color1);
+}
