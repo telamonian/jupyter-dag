@@ -2,11 +2,10 @@
  * Wires between cells: how they are stored in the notebook, the graph algorithms over them, and
  * the {@link DagGraphModel} that turns the notebook model's signals into one change signal.
  *
- * A wire is a directed edge "target runs after source". It is stored on the target cell only,
- * as an entry of `inputs` in the cell's `jupyter-dag` metadata ({@link IDagCellMetadata}), so the
- * notebook file, not this module, is the source of truth; every function here reads the wires
- * back from the cells. The graph algorithms are derived from ipyflow's
- * `frontend/labextension/src/graph/closure.ts` (BSD-3-Clause, Stephen Macke).
+ * Wires live in the cells' metadata ({@link IDagCellMetadata}), so the notebook file is the source
+ * of truth and every function here reads them back from the cells. The graph algorithms are
+ * derived from ipyflow's `frontend/labextension/src/graph/closure.ts` (BSD-3-Clause, Stephen
+ * Macke).
  *
  * @module
  */
@@ -62,12 +61,12 @@ export function getCellMetadata(cell: ICellModel): IDagCellMetadata {
  * @remarks
  * Metadata values are stored whole under their key, so a change to one field is a read, merge and
  * write of the object. `CellModel.setMetadata` (`@jupyterlab/cells/src/model.ts:361-367`) deletes
- * the key when the value is `undefined`, which is why the whole object is always passed.
- * `YBaseCell.setMetadata`
- * (`@jupyter/ydoc/src/ycell.ts:522-524`) compares the new value with `JSONExt.deepEqual` and
- * returns without writing when nothing changed, so writing an unchanged object emits no
- * `metadataChanged`. Each write is its own Yjs transaction (`ycell.ts:526`) unless a caller wraps
- * several in `sharedModel.transact`, which also makes them one undo step.
+ * the key when the value is `undefined`, so what is passed is always the whole merged object.
+ * `YBaseCell.setMetadata` (`@jupyter/ydoc/src/ycell.ts:522-524`) compares the new value with
+ * `JSONExt.deepEqual` and returns without writing when nothing changed, so writing an unchanged
+ * object emits no `metadataChanged`. Each write is its own Yjs transaction (`ycell.ts:526`) unless
+ * a caller wraps several in `sharedModel.transact` (`@jupyter/ydoc/src/ydocument.ts:231-233`),
+ * whose `undoable` flag also makes them one undo step.
  */
 export function updateCellMetadata(cell: ICellModel, patch: Partial<IDagCellMetadata>): void {
   cell.setMetadata(METADATA_KEY, { ...getCellMetadata(cell), ...patch });
@@ -220,8 +219,7 @@ export function upstreamOf(start: Iterable<string>, wires: IWire[], inclusive: b
  * @returns True when `target` already reaches `source` (or the two are the same cell).
  *
  * @remarks
- * A forward walk from `target`, so the cost is linear in the wires; a caller that runs it per
- * pointer move should read them from {@link DagGraphModel.wires}, which caches them.
+ * A forward walk from `target`, linear in the wires.
  */
 export function wouldCreateCycle(wires: IWire[], source: string, target: string): boolean {
   return source === target || downstreamOf([target], wires, true).has(source);
@@ -236,11 +234,11 @@ export function wouldCreateCycle(wires: IWire[], source: string, target: string)
  * document order wins.
  *
  * @remarks
- * Kahn's algorithm, with the ready list re-sorted by document rank after each step, which is what
- * makes the result deterministic and notebook-like. `topologicSort` from `@lumino/algorithm`
- * (`@lumino/algorithm/src/sort.ts:37`) is not used because it takes only edges, so cells without
- * wires would drop out, and it has no tie-break. A cycle cannot occur (see {@link addWire}); if
- * one did, its cells would never become ready and would be left out of the result.
+ * Kahn's algorithm, with the ready list re-sorted by document rank after each step, which makes
+ * the result deterministic and notebook-like. `topologicSort` (`@lumino/algorithm/src/sort.ts:37`)
+ * is not used because it takes only edges, so cells without wires would drop out, and it has no
+ * tie-break. A cycle cannot occur (see {@link addWire}); if one did, its cells would never become
+ * ready and be left out of the result.
  */
 export function topologicalOrder(cellIds: string[], wires: IWire[]): string[] {
   const rank = new Map<string, number>(cellIds.map((id, i) => [id, i]));
@@ -282,8 +280,7 @@ export function topologicalOrder(cellIds: string[], wires: IWire[]): string[] {
  * source, which marks the cell stale; `ICellModel.contentChanged` is not used for that because it
  * also fires when outputs are written, which would mark a cell stale as it runs.
  *
- * The class writes nothing back to the document; the state map is the only thing it owns, and it
- * is not persisted.
+ * The class writes nothing back to the document; the state map is the only thing it owns.
  */
 export class DagGraphModel implements IDagGraphModel, IDisposable {
   /**
@@ -399,9 +396,8 @@ export class DagGraphModel implements IDagGraphModel, IDisposable {
    * Announce an `'edges'` change when a cell's `inputs` changed; ignore other metadata writes.
    *
    * @remarks
-   * Position and size writes share the metadata key with the wires, so old and new `inputs` are
-   * compared (`ArrayExt.shallowEqual`, `@lumino/algorithm/src/array.ts:643`) and the wires cache
-   * is dropped only when they differ.
+   * Old and new `inputs` are compared with `ArrayExt.shallowEqual`
+   * (`@lumino/algorithm/src/array.ts:643`); the wires cache is dropped only when they differ.
    */
   private _onCellMetadataChanged(cell: ICellModel, change: IMapChange): void {
     if (change.key !== METADATA_KEY) {

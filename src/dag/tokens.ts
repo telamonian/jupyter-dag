@@ -193,17 +193,16 @@ export type IDagTracker = IWidgetTracker<IDagDocument>;
  * The token under which the view plugin provides its tracker.
  *
  * @remarks
- * A `Token` (`@lumino/coreutils/src/token.ts:18`) is a typed identity; this one carries the
- * tracker of open DAG views, so another plugin can list it and be handed the tracker. The token
- * and the type alias share a name on purpose, the JupyterLab convention that lets `IDagTracker`
- * be both the runtime token and the type.
+ * A `Token` (`@lumino/coreutils/src/token.ts:18`) is a typed identity. The token and the type
+ * alias share a name, the JupyterLab convention that lets `IDagTracker` be both the runtime token
+ * and the type.
  */
 export const IDagTracker = new Token<IDagTracker>(
   `${PLUGIN_ID_BASE}:IDagTracker`,
   'Tracker for open DAG views of notebooks.'
 );
 
-/** Makes a graph model for any notebook model; what the reactive plugin will call. */
+/** Makes a graph model for any notebook model. */
 export interface IDagGraphModelFactory {
   (notebook: INotebookModel): IDagGraphModel;
 }
