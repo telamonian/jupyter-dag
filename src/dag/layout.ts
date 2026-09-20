@@ -38,10 +38,11 @@ const FALLBACK = { width: 360, height: 140 };
  * `position` is its top-left corner, hence the half-size subtraction; `nodesep`, `ranksep` and
  * `edgesep` are in pixels.
  *
- * With no nodes at all, `g.graph().width` after `layout` is `-Infinity` (the built package folds
- * the bounds over an empty list), so `Number.isFinite`, not `??`, decides whether there is a graph
- * to place the side column next to. A node with no wires is left out of the dagre graph on
- * purpose: dagre would otherwise give every isolated node its own rank and stretch the drawing.
+ * A node with no wires is left out of the dagre graph: dagre would otherwise give every isolated
+ * node its own rank and stretch the drawing. The dagre graph is therefore empty whenever the
+ * notebook has no wires, and then `g.graph().width` after `layout` is `-Infinity` (the built
+ * package folds the bounds over an empty list), which is why `Number.isFinite`, not `??`, decides
+ * whether there is a graph to place the side column next to.
  *
  * `sourcePosition` and `targetPosition` tell React Flow which side of a node an edge leaves from
  * and arrives at (`Position.Bottom` to `Position.Top` for a top-to-bottom layout); they have to

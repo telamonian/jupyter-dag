@@ -3,8 +3,8 @@
  * component.
  *
  * The DAG canvas is React (React Flow), while JupyterLab's cells are Lumino widgets built on the
- * shared cell model. Each node therefore creates a real `Cell` widget for its cell, exactly as
- * the notebook panel would, and attaches it to a `div` that React owns. The model is the same
+ * shared cell model. Each node therefore creates a real `Cell` widget for its cell, as the
+ * notebook panel would, and attaches it to a `div` that React owns. The model is the same
  * object the notebook panel edits, so typing in either view shows up in the other.
  *
  * @module
@@ -48,9 +48,8 @@ export interface ICellNodeContext {
   /** Show only the outputs of code cells, no editor. */
   outputOnly: boolean;
   /**
-   * Register the live widget for a cell, or unregister it with `null`.
-   *
-   * Only `Cell` widgets are executable; output-only nodes are not registered.
+   * Register the live widget for a cell, or unregister it with `null`; output-only nodes, which
+   * are not executable, register nothing.
    *
    * @param id - The cell id.
    * @param cell - The widget, or `null` on unmount.
@@ -74,7 +73,7 @@ function useCellNodeContext(): ICellNodeContext {
 }
 
 /**
- * Connect a Lumino signal for the lifetime of the component (or until `slot` changes).
+ * Connect a Lumino signal for the lifetime of the component.
  *
  * @typeParam T - The signal's sender type.
  * @typeParam U - The signal's argument type.
@@ -83,7 +82,7 @@ function useCellNodeContext(): ICellNodeContext {
  *
  * @remarks
  * A Lumino signal outlives any React render, so the connection lives in an effect whose cleanup
- * disconnects it; React re-runs the effect when `signal` or `slot` changes identity.
+ * disconnects it.
  */
 export function useLuminoSignal<T, U>(signal: ISignal<T, U>, slot: (sender: T, args: U) => void): void {
   useEffect(() => {
@@ -102,8 +101,8 @@ export function useLuminoSignal<T, U>(signal: ISignal<T, U>, slot: (sender: T, a
  * @returns The current {@link DagNodeState}; the component re-renders when it changes.
  *
  * @remarks
- * A subscription per node is cheaper than it looks (a set lookup per node per change), and a
- * `'state'` change re-renders only the nodes it names, not the node array.
+ * A subscription per node is cheaper than it looks (an `includes` on the changed ids, per node per
+ * change), and a `'state'` change re-renders only the nodes it names, not the node array.
  */
 function useNodeState(graph: IDagGraphModel, cellId: string): DagNodeState {
   const [state, setState] = useState(() => graph.stateOf(cellId));
@@ -120,21 +119,21 @@ function useNodeState(graph: IDagGraphModel, cellId: string): DagNodeState {
 }
 
 /**
- * Create a live Lumino cell widget over the shared cell model, built like `StaticNotebook` does.
+ * Create a live Lumino cell widget over the shared cell model.
  *
  * @param ctx - The node context, for the content factory, rendermime and translator.
  * @param model - The cell model; its `type` picks the widget class.
  * @returns A `CodeCell`, `MarkdownCell` or `RawCell` that is not yet attached anywhere.
  *
  * @remarks
- * This mirrors `StaticNotebook._createCodeCell` and its siblings
+ * Mirrors `StaticNotebook._createCodeCell` and its siblings
  * (`@jupyterlab/notebook/src/widget.ts:720`, `:762`, `:790`), going through the same content
  * factory (`widget.ts:1293-1303`) so any extension that customises cell widgets applies here too.
  * The editor configuration is the static default (`StaticNotebook.defaultEditorConfig`,
  * `widget.ts:1327`) rather than the user's notebook settings. `placeholder` is `false`: the
- * notebook panel creates cells as placeholders when
- * windowing is on (`widget.ts:731`) and fills them in as they scroll into view; a node has no
- * scrolling container to drive that, so the editor is built at once.
+ * notebook panel creates cells as placeholders when windowing is on (`widget.ts:731`) and fills
+ * them in as they scroll into view; a node has no scrolling container to drive that, so the
+ * editor is built at once.
  */
 export function createCellWidget(ctx: ICellNodeContext, model: ICellModel): Cell {
   const { contentFactory, rendermime, translator } = ctx;
@@ -168,8 +167,7 @@ export function createCellWidget(ctx: ICellNodeContext, model: ICellModel): Cell
   }
 }
 /**
- * What a code cell's node shows when the `outputOnlyNodes` setting is on: the outputs, with no
- * second editor on the cell's model.
+ * What a code cell's node shows when the `outputOnlyNodes` setting is on: the outputs alone.
  *
  * @param ctx - The node context, for the content factory and rendermime.
  * @param model - A code cell model; its `outputs` are shown.
@@ -214,12 +212,12 @@ export const CellPort = (props: HandleProps): JSX.Element => <Handle {...props} 
  *
  * Resizing without a parent. A widget inside a Lumino layout receives resize messages from its
  * parent; this one has none, so the component sends `ResizeMessage.UnknownSize`
- * (`widget.ts:1093`) itself once after attaching and again whenever a `ResizeObserver` sees the
- * host change size. The initial one is sent synchronously (`MessageLoop.sendMessage`,
- * `@lumino/messaging/src/index.ts:241`) so the editor measures before the first paint. The
- * observer ones are posted (`MessageLoop.postMessage`, `index.ts:276`), which queues them for the
- * next turn of the event loop instead of running a relayout inside the observer callback; the
- * editor's own measurement then batches repeated requests.
+ * (`@lumino/widgets/src/widget.ts:1093`) itself once after attaching and again whenever a
+ * `ResizeObserver` sees the host change size. The initial one is sent synchronously
+ * (`MessageLoop.sendMessage`, `@lumino/messaging/src/index.ts:241`) so the editor measures before
+ * the first paint. The observer ones are posted (`MessageLoop.postMessage`, `index.ts:276`), which
+ * queues them for the next turn of the event loop instead of running a relayout inside the
+ * observer callback; the editor's own measurement then batches repeated requests.
  *
  * Disposing a cell widget never disposes the shared model, which belongs to the notebook.
  *
@@ -278,10 +276,10 @@ function CellNodeView({ id, selected }: NodeProps<CellNode>): JSX.Element {
  * The node types passed to React Flow: one, `cellNode`.
  *
  * @remarks
- * Defined at module scope on purpose. React Flow compares `nodeTypes` by identity, and a new object
- * on every render would make every node a new component type, which unmounts and remounts each
- * node and with it the Lumino cell inside. `memo` additionally skips re-rendering a node whose
- * props are unchanged, which is most nodes on most updates.
+ * Module scope because React Flow compares `nodeTypes` by identity: a new object on every render
+ * would make every node a new component type, which unmounts and remounts each node and with it
+ * the Lumino cell inside. `memo` additionally skips re-rendering a node whose props are unchanged,
+ * which is most nodes on most updates.
  *
  * @see https://reactflow.dev/error#002
  */

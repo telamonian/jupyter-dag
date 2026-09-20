@@ -2,9 +2,9 @@
  * Wire format of the jupyter-dag kernel-protocol additions, and the clients that speak it.
  *
  * Everything the frontend sends to or reads from the kernel is defined here: the constants and
- * message bodies, and the two transports that carry them. The constants and message bodies mirror
- * `jupyter_dag/protocol.py`, which owns the design; `jupyter_dag/tests/test_protocol.py` reads this
- * file, so a string constant changed here without its Python twin fails that test.
+ * message bodies, which mirror `jupyter_dag/protocol.py` (the owner of the design), and the two
+ * transports that carry them. `jupyter_dag/tests/test_protocol.py` reads this file, so a string
+ * constant changed here without its Python twin fails that test.
  *
  * {@link DagKernelClient} chooses between {@link ShellTransport} and {@link CommTransport} from what
  * the kernel advertises in `kernel_info_reply`, and is what the rest of the extension talks to.
@@ -53,8 +53,8 @@ export interface IAnalyzeRequestContent {
  * Analysis result for a cell that parsed, or that was a cell magic and got no analysis.
  *
  * @remarks
- * The kernel derives the four name lists in `jupyter_dag/analysis.py` (`analyze_source`); this is
- * its `AnalyzedCellOk` TypedDict.
+ * The kernel derives the three name lists and the `dynamic` flag in `jupyter_dag/analysis.py`
+ * (`analyze_source`); this is its `AnalyzedCellOk` TypedDict.
  */
 export interface IAnalyzedCellOk {
   /** The id from the matching {@link IAnalyzeCellInput}. */
@@ -67,7 +67,10 @@ export interface IAnalyzedCellOk {
   referenced: string[];
   /** Names in `del` statements. Sorted. */
   deleted: string[];
-  /** True when the cell can change names in ways static analysis cannot see (star imports, `exec`, ...). */
+  /**
+   * True when the cell can change names in ways static analysis cannot see: a star import or a
+   * call to any of `DYNAMIC_CALLS` in `jupyter_dag/analysis.py`.
+   */
   dynamic: boolean;
 }
 /** Analysis result for a cell whose source did not parse (`AnalyzedCellError` in Python). */
@@ -110,7 +113,7 @@ export type IAnalyzeReplyContent =
  * @remarks
  * A set difference of the visible names before and after the cell ran, so a name rebound to a
  * new value appears in neither list. `DagKernel.do_execute` in `jupyter_dag/kernel/kernel.py`
- * shows a `namespace_delete` request and its reply.
+ * computes it; `NamespaceDelta` in `jupyter_dag/protocol.py` shows a purge request and its reply.
  */
 export interface INamespaceDelta {
   /** Visible names bound after the cell ran that were not bound before. Sorted. */
@@ -122,8 +125,8 @@ export interface INamespaceDelta {
  * `execute_request` content with the two jupyter-dag extensions.
  *
  * @remarks
- * ipykernel passes `do_execute` only the fields it knows, so the kernel reads both off the parent
- * message instead (`DagKernel.do_execute` in `jupyter_dag/kernel/kernel.py`).
+ * ipykernel passes `do_execute` only the fields it knows, so a field added here also has to be
+ * fetched from the parent message in `DagKernel.do_execute` (`jupyter_dag/kernel/kernel.py`).
  */
 export type IDagExecuteRequestContent = KernelMessage.IExecuteRequestMsg['content'] & {
   /** Names to unbind before running. */
@@ -165,6 +168,13 @@ export interface IDagTransport extends IDisposable {
    * Unbind names in the kernel namespace without running any code.
    *
    * @param names - The names to unbind; unknown names are ignored by the kernel.
+   *
+   * @remarks
+   * What was unbound is not returned; each transport says what it does with the kernel's answer.
+   * Both send the request on the shell channel, and the kernel handles shell messages in order, so
+   * an `execute_request` sent after this call runs after the purge, with one exception: a
+   * {@link CommTransport} whose comm the kernel has closed reopens it first, a round trip during
+   * which the `execute_request` can overtake the purge.
    */
   namespaceDelete(names: string[]): Promise<void>;
 }
@@ -177,26 +187,15 @@ type ControlStandIn = KernelMessage.IDebugRequestMsg;
  * `analyze_request` as a real shell (or control) message: the protocol as designed.
  *
  * @remarks
- * Why a stand-in message type. `KernelMessage.createMessage` is overloaded once per known
- * message interface (`@jupyterlab/services/src/kernel/messages.ts:21-158`), and its generic
- * implementation (`messages.ts:162`) types `msgType` and `channel` from that interface, whose
- * `ShellMessageType` and `ControlMessageType` unions (`messages.ts:184`, `:213`) are closed. A
- * new message type therefore cannot be expressed in the types; the code builds the message as an
- * existing request type of the right channel, `IIsCompleteRequestMsg` (`messages.ts:1059`)
- * or `IDebugRequestMsg` (`messages.ts:1244`), and overwrites the `msgType` string. Only the string
- * reaches the wire, and the kernel dispatches on it (`DagKernel.analyze_request` in
- * `jupyter_dag/kernel/kernel.py`). Adding `analyze_request` to those unions is the change core
- * would need.
+ * `@jupyterlab/services` closes its message-type unions, so `analyze_request` cannot be expressed
+ * in the types; {@link ShellTransport.analyze} builds it under a stand-in type. Adding
+ * `analyze_request` to those unions is the change core would need.
  *
  * Which channel. The control channel is the design's choice, because analysis needs no access to
  * the namespace and the control thread is free while a cell runs; the shell channel is the
- * default here because control messages hold ipykernel's control lock for the whole batch. The
+ * default here because control messages hold ipykernel's control lock for the whole batch, so an
+ * interrupt or debug request sent meanwhile waits for the analysis to finish. The
  * `analyzeChannel` setting switches between them (`IDagSettings` in `tokens.ts`).
- *
- * Why every message carries `subshellId`. The connection may be attached to a subshell (JEP 91);
- * `Kernel.IKernelConnection.subshellId` (`@jupyterlab/services/src/kernel/kernel.ts:622`,
- * `default.ts:221`) is `null` on the main shell, and stamping it lets the kernel route the
- * request to the subshell this connection belongs to, as every core request does.
  */
 export class ShellTransport implements IDagTransport {
   /**
@@ -215,14 +214,28 @@ export class ShellTransport implements IDagTransport {
    * @throws Error when the reply status is `'error'` or `'abort'`.
    *
    * @remarks
+   * The message is built as an existing request type of the right channel, `IIsCompleteRequestMsg`
+   * (`@jupyterlab/services/src/kernel/messages.ts:1059`) or `IDebugRequestMsg` (`messages.ts:1244`),
+   * with the `msgType` string overwritten; only the string reaches the wire, and the kernel
+   * dispatches on it (`DagKernel.analyze_request` in `jupyter_dag/kernel/kernel.py`). A new message
+   * type cannot be expressed in the types because `KernelMessage.createMessage` is overloaded once
+   * per known message interface (`messages.ts:21-158`), and its generic implementation
+   * (`messages.ts:162`) types `msgType` and `channel` from that interface, whose `ShellMessageType`
+   * and `ControlMessageType` unions (`messages.ts:184`, `:213`) are closed.
+   *
+   * The message carries the connection's `subshellId` (JEP 91):
+   * `Kernel.IKernelConnection.subshellId` (`@jupyterlab/services/src/kernel/kernel.ts:622`,
+   * `default.ts:221`) is `null` on the main shell, and stamping it lets the kernel route the
+   * request to the subshell this connection belongs to, as every core request does.
+   *
    * `sendShellMessage(msg, expectReply, disposeOnDone)`
    * (`@jupyterlab/services/src/kernel/default.ts:359`) and `sendControlMessage`
    * (`default.ts:390`) return a future. With `expectReply` true, the future's `done` promise
    * (`@jupyterlab/services/src/kernel/future.ts:56`) resolves with the reply message once both the
    * reply (`future.ts:241-244`) and the `idle` status on iopub (`future.ts:267-270`) have arrived;
-   * `disposeOnDone` true then disposes the future (`future.ts:274-283`), which is fine because
-   * nothing else holds it. A kernel that never replies would leave the promise pending, which is
-   * why the kernel side sends a reply even when analysis raises.
+   * `disposeOnDone` true then disposes the future (`future.ts:274-283`); nothing else holds it. A
+   * kernel that never replies would leave the promise pending, so the kernel side sends a reply
+   * even when analysis raises.
    */
   async analyze(content: IAnalyzeRequestContent): Promise<IAnalyzeReplyOk> {
     const kernel = this._kernel;
@@ -252,8 +265,8 @@ export class ShellTransport implements IDagTransport {
    * @remarks
    * `requestExecute` (`@jupyterlab/services/src/kernel/default.ts:789`) is the same call every cell
    * run makes; the content type has to be widened by hand because `@jupyterlab/services` types it
-   * as the stock `execute_request` content. The kernel's `namespace_delta` for the purge comes
-   * back on the reply like any other, and {@link DagKernelClient} reads it from there.
+   * as the stock `execute_request` content. The purge's own `execute_reply` carries the
+   * `namespace_delta` of what it unbound.
    */
   async namespaceDelete(names: string[]): Promise<void> {
     const content: IDagExecuteRequestContent = {
@@ -289,23 +302,24 @@ interface ICommPayload {
  * kernel has closed it; a kernel without the target is reported by {@link CommTransport.open}
  * rather than by a request that never answers.
  *
- * How a request gets its reply. `comm.send(data)` (`comm.ts:196-219`) sends a `comm_msg` with
- * `expectReply` false, so no shell reply is waited for. The kernel handler sends its reply with
- * `comm.send` while still handling the request, and ipykernel stamps that outgoing `comm_msg`
- * with the request as its parent (see the module docstring of `jupyter_dag/kernel/comm.py`). The
- * request future's `onIOPub` (`future.ts:86`) receives every iopub message whose parent is the
- * request, so the reply arrives there, ahead of the `idle` status that resolves `done`. No request
- * ids are needed.
+ * How a request gets its reply. `comm.send(data)`
+ * (`@jupyterlab/services/src/kernel/comm.ts:196-219`) sends a `comm_msg` with `expectReply` false,
+ * so no shell reply is waited for. The kernel handler sends its reply with `comm.send` while still
+ * handling the request, and ipykernel stamps that outgoing `comm_msg` with the request as its
+ * parent (see the module docstring of `jupyter_dag/kernel/comm.py`). The request future's
+ * `onIOPub` (`@jupyterlab/services/src/kernel/future.ts:86`) receives every iopub message whose
+ * parent is the request, so the reply arrives there, ahead of the `idle` status that resolves
+ * `done`. No request ids are needed.
  */
 export class CommTransport implements IDagTransport {
   /**
    * @param _kernel - The connection to open the comm on.
    *
    * @remarks
-   * `registerCommTarget` (`@jupyterlab/services/src/kernel/default.ts:1084`) is the other
-   * direction: the kernel opening a comm towards the frontend, delivered through
-   * `_handleCommOpen` (`default.ts:1350-1382`) to the callback. Registering it now is preparation
-   * for a kernel that pushes without being asked; the callback is still a stub.
+   * The kernel-initiated direction is registered but still a stub: `registerCommTarget`
+   * (`@jupyterlab/services/src/kernel/default.ts:1084`) is the kernel opening a comm towards the
+   * frontend, delivered through `_handleCommOpen` (`default.ts:1350-1382`) to the callback.
+   * Registering it now is preparation for a kernel that pushes without being asked.
    */
   constructor(private _kernel: Kernel.IKernelConnection) {
     // TODO: kernel-initiated comms (the kernel opening `jupyter-dag` towards the frontend, e.g. right
@@ -332,9 +346,8 @@ export class CommTransport implements IDagTransport {
    * Open the comm and wait until the kernel has accepted it.
    *
    * @returns The open comm, also kept as the transport's current comm.
-   * @throws Error when comms are disabled on the connection
-   * (`handleComms`, `@jupyterlab/services/src/kernel/kernel.ts:112`) or the kernel has no
-   * `jupyter-dag` target (the comm is disposed by the time `open().done` resolves).
+   * @throws Error when comms are disabled on the connection (`handleComms`,
+   * `@jupyterlab/services/src/kernel/kernel.ts:112`) or the kernel has no `jupyter-dag` target.
    *
    * @remarks
    * `createComm(targetName)` (`@jupyterlab/services/src/kernel/default.ts:1038`) makes a
@@ -347,9 +360,8 @@ export class CommTransport implements IDagTransport {
    * `comm_msg` from the kernel with this comm id reaches `_handleCommMsg` (`default.ts:1407-1419`),
    * which calls the `onMsg` callback (`comm.ts:151`).
    *
-   * A `CommHandler` that the kernel has closed cannot be reopened, which is why every call creates
-   * a new one instead of reusing the last; the `onClose` callback (`comm.ts:131`) drops the
-   * reference so the next request opens again.
+   * A `CommHandler` the kernel has closed cannot be reopened, so every call creates a new one; the
+   * `onClose` callback (`comm.ts:131`) drops the reference and the next request opens again.
    */
   async open(): Promise<Kernel.IComm> {
     const kernel = this._kernel;
@@ -384,7 +396,8 @@ export class CommTransport implements IDagTransport {
    * @remarks
    * The reply is picked out of the request future's iopub stream by message type
    * (`isCommMsgMsg`, `@jupyterlab/services/src/kernel/messages.ts:736`) and comm id, then read
-   * after `done` resolves; see the class remarks for why it is guaranteed to have arrived by then.
+   * after `done` resolves, which is safe because the kernel sends the reply while still handling
+   * the request, ahead of the `idle` status that resolves `done`.
    */
   async analyze(content: IAnalyzeRequestContent): Promise<IAnalyzeReplyOk> {
     const comm = this._comm ?? (await this.open());
@@ -410,8 +423,9 @@ export class CommTransport implements IDagTransport {
    * @param names - The names to unbind.
    *
    * @remarks
-   * The reply is not read: the names that were actually unbound show up in the `namespace_delta`
-   * of the next `execute_reply`, which {@link DagKernelClient} watches on every connection.
+   * The comm reply (`{ removed: [...] }`, `DagCommTarget._namespace_delete` in
+   * `jupyter_dag/kernel/comm.py`) is discarded. A comm purge produces no `execute_reply`, so what it
+   * unbound appears in no `namespace_delta` either.
    */
   async namespaceDelete(names: string[]): Promise<void> {
     const comm = this._comm ?? (await this.open());
@@ -444,17 +458,16 @@ export class CommTransport implements IDagTransport {
  * `namespace_delta` stream.
  *
  * @remarks
- * Lifetime. One client per DAG view, bound to the view's `ISessionContext`, which outlives any
- * particular kernel: the session context re-emits the kernel connection's signals and swaps the
- * connection on kernel change (`@jupyterlab/apputils/src/sessioncontext.tsx:91`, `:111`). The
- * client follows those signals and rebuilds its transport each time.
+ * Lifetime. A client is bound to one `ISessionContext`, which outlives any particular kernel: the
+ * session context re-emits the kernel connection's signals and swaps the connection on kernel
+ * change (`@jupyterlab/apputils/src/sessioncontext.tsx:91`, `:111`). The client follows those
+ * signals and rebuilds its transport each time.
  *
  * Feature detection. `kernel.info` (`@jupyterlab/services/src/kernel/kernel.ts:90`,
  * `default.ts:258`) is a promise resolved by the connection's first `kernel_info_reply`
  * (`default.ts:644-684`), so its `supported_features` are what the kernel advertised when the
  * connection was made (JEP 92). A kernel that advertises {@link FEATURE_ANALYZE} gets a
- * {@link ShellTransport}; any other kernel is probed with a {@link CommTransport}, which succeeds
- * only after `%load_ext jupyter_dag` has registered the comm target.
+ * {@link ShellTransport}; any other kernel is probed with a {@link CommTransport}.
  * {@link DagKernelClient.featuresChanged} announces each result.
  *
  * Why restart is handled through two signals. A user restart goes through
@@ -476,6 +489,11 @@ export class DagKernelClient implements IDisposable {
   /**
    * @param sessionContext - The session whose kernels this client follows.
    * @param analyzeChannel - The channel {@link ShellTransport} sends `analyze_request` on.
+   *
+   * @remarks
+   * Detection is not started here: a kernel already running when the client is made sends no
+   * `kernelChanged`, so the owner calls {@link DagKernelClient.detectFeatures} once itself
+   * (`DagPanel` in `document.tsx` does).
    */
   constructor(sessionContext: ISessionContext, analyzeChannel: AnalyzeChannel = 'shell') {
     this._sessionContext = sessionContext;
@@ -605,7 +623,8 @@ export class DagKernelClient implements IDisposable {
    * Dispose the transport and disconnect from the session context and kernel.
    *
    * @remarks
-   * `Signal.clearData(this)` covers the three `connect(..., this)` calls the constructor made.
+   * `Signal.clearData(this)` removes every connection made with `connect(..., this)`, including the
+   * `anyMessage` one that moves to each new kernel connection.
    */
   dispose(): void {
     if (this._isDisposed) {

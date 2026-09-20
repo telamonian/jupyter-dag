@@ -85,10 +85,10 @@ function wireToEdge(wire: IWire): Edge {
  * @returns A `cellNode` with no data; the node reads everything from the graph model.
  *
  * @remarks
- * `deletable: false` is what stops React Flow from deleting nodes on Backspace: cells are deleted
- * in the notebook, never from the canvas, and the cell list drives `'nodes'` changes. React Flow's
- * `getElementsToRemove` skips non-deletable nodes and therefore also their connected edges, so
- * only explicitly selected edges are ever deleted from here.
+ * `deletable: false` stops React Flow from deleting nodes on Backspace: cells are deleted only in
+ * the notebook, and the cell list drives `'nodes'` changes. React Flow's `getElementsToRemove`
+ * skips non-deletable nodes and therefore also their connected edges, so only explicitly selected
+ * edges are deleted from here.
  *
  * @see https://reactflow.dev/api-reference/types/node
  */
@@ -118,7 +118,7 @@ export interface IDagCanvasProps {
 }
 
 /**
- * The flow itself; must live inside a `ReactFlowProvider` because it uses the React Flow hooks.
+ * The flow: everything rendered inside the `ReactFlowProvider`.
  *
  * @param props - See {@link IDagCanvasProps}.
  * @returns The `ReactFlow` element with its background and controls.
@@ -139,21 +139,21 @@ export interface IDagCanvasProps {
  *
  * How gestures reach the model. A finished drag or resize is a `'position'` change with
  * `dragging: false` or a `'dimensions'` change with `resizing: false`; those are persisted to cell
- * metadata, batched in one `sharedModel.transact` (`@jupyter/ydoc/src/ydocument.ts:231-233`,
- * where the `undoable` flag makes the transaction one undo step). Connecting two ports calls
- * {@link addWire}; deleting a selected edge or reconnecting one calls {@link removeWire}; the model
- * then announces the change and `refresh` rebuilds the edges. Only `applyEdgeChanges` is still
- * applied locally, for selection changes. Auto-layout reads the current nodes and edges from the
- * React Flow instance (`getNodes`, `getEdges`) rather than from React state, so the callback does
- * not have to change identity every time a node moves.
+ * metadata in one `sharedModel.transact`, so a multi-node drag is one undo step (the transaction
+ * rule is on `updateCellMetadata` in `wiring.ts`). Connecting two ports calls {@link addWire};
+ * deleting a selected edge or reconnecting one calls {@link removeWire}; the model then announces
+ * the change and `refresh` rebuilds the edges. Every change list is also applied locally, with
+ * `applyNodeChanges` and `applyEdgeChanges`, since drags in progress and selection exist only in
+ * React state; a removal is applied locally and then confirmed by `refresh`. Auto-layout reads the
+ * current nodes and edges from the React Flow instance (`getNodes`, `getEdges`) rather than from
+ * React state, so the callback does not have to change identity every time a node moves.
  *
  * `isValidConnection` runs the cycle check on every pointer move while a connection is dragged,
- * against the cached {@link DagGraphModel.wires}. `ConnectionMode.Strict` means a connection must
- * go from a source handle to a target handle, so wires cannot be drawn backwards.
- *
- * On reconnect, the old wire is removed before the new one is added: `removeWire` writes the
- * metadata synchronously, which invalidates the wire cache, so the cycle check inside `addWire`
- * sees the graph without the old wire.
+ * against the cached {@link DagGraphModel.wires}. On reconnect the old wire is removed before the
+ * new one is added, so the cycle check inside {@link addWire} sees the graph without it; the graph
+ * model answers for the document as it stands at the call (`IDagGraphModel` in `tokens.ts`).
+ * `ConnectionMode.Strict` means a connection must go from a source handle to a target handle, so
+ * wires cannot be drawn backwards.
  *
  * @see https://reactflow.dev/api-reference/hooks/use-react-flow
  * @see https://reactflow.dev/api-reference/hooks/use-nodes-initialized
@@ -323,8 +323,7 @@ function DagFlow({ graph, settings, layoutRequested }: IDagCanvasProps): JSX.Ele
  *
  * @remarks
  * `ReactFlowProvider` holds the React Flow store, and React Flow's hooks read it from context, so
- * any component that calls one has to be rendered inside the provider; that is why the flow is a
- * separate component.
+ * the flow, which calls them, is a separate component rendered inside the provider.
  *
  * @see https://reactflow.dev/api-reference/react-flow-provider
  */
