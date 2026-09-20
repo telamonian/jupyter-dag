@@ -124,12 +124,12 @@ export interface IDagCanvasProps {
  * @returns The `ReactFlow` element with its background and controls.
  *
  * @remarks
- * State kept here. `nodes` and `edges` are React state seeded from the model; `direction` is the
- * layout direction (from the notebook's metadata, else the settings); `defaultViewport` is read
- * once because React Flow only applies that prop at mount. `useNodesInitialized` reports when
- * every node has been measured in the DOM, and `useStore` exposes the container size; both gate
- * the first automatic layout, because `fitView` on a container of zero size (a tab that is not
- * yet shown) produces `NaN` positions.
+ * `defaultViewport` is read once into state because React Flow only applies that prop at mount.
+ * `useNodesInitialized` reports when every node has been measured in the DOM, and `useStore`
+ * exposes the container size; both gate the first automatic layout, because `fitView` on a
+ * container of zero size (a tab that is not yet shown) produces `NaN` positions. That first
+ * layout runs only when the notebook has no stored viewport, so a notebook laid out once opens as
+ * the user left it.
  *
  * How model changes reach the canvas. `refresh` runs on every graph change. For `'nodes'` it
  * rebuilds the node array from the cell list but keeps the existing node object for every cell
@@ -147,10 +147,9 @@ export interface IDagCanvasProps {
  * React Flow instance (`getNodes`, `getEdges`) rather than from React state, so the callback does
  * not have to change identity every time a node moves.
  *
- * Why `isValidConnection` matters for performance. React Flow calls it on every pointer move while
- * a connection is being dragged, and it runs a cycle check over the wires, which is why
- * {@link DagGraphModel.wires} is cached. `ConnectionMode.Strict` means a connection must go from a
- * source handle to a target handle, so wires cannot be drawn backwards.
+ * `isValidConnection` runs the cycle check on every pointer move while a connection is dragged,
+ * against the cached {@link DagGraphModel.wires}. `ConnectionMode.Strict` means a connection must
+ * go from a source handle to a target handle, so wires cannot be drawn backwards.
  *
  * On reconnect, the old wire is removed before the new one is added: `removeWire` writes the
  * metadata synchronously, which invalidates the wire cache, so the cycle check inside `addWire`
@@ -323,9 +322,9 @@ function DagFlow({ graph, settings, layoutRequested }: IDagCanvasProps): JSX.Ele
  * @returns The canvas element.
  *
  * @remarks
- * `ReactFlowProvider` holds the React Flow store; the hooks `DagFlow` uses (`useReactFlow`,
- * `useStore`, `useNodesInitialized`, `useOnSelectionChange`) need to be rendered inside it, which
- * is why the flow is a separate component.
+ * `ReactFlowProvider` holds the React Flow store, and React Flow's hooks read it from context, so
+ * any component that calls one has to be rendered inside the provider; that is why the flow is a
+ * separate component.
  *
  * @see https://reactflow.dev/api-reference/react-flow-provider
  */

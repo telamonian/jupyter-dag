@@ -102,9 +102,8 @@ export function useLuminoSignal<T, U>(signal: ISignal<T, U>, slot: (sender: T, a
  * @returns The current {@link DagNodeState}; the component re-renders when it changes.
  *
  * @remarks
- * Every node subscribes to the graph's `changed` signal and ignores changes that are not a
- * `'state'` change naming its own cell. That is cheaper than it looks (a set lookup per node per
- * change) and it means a state change re-renders only the nodes concerned, not the node array.
+ * A subscription per node is cheaper than it looks (a set lookup per node per change), and a
+ * `'state'` change re-renders only the nodes it names, not the node array.
  */
 function useNodeState(graph: IDagGraphModel, cellId: string): DagNodeState {
   const [state, setState] = useState(() => graph.stateOf(cellId));
@@ -131,9 +130,9 @@ function useNodeState(graph: IDagGraphModel, cellId: string): DagNodeState {
  * This mirrors `StaticNotebook._createCodeCell` and its siblings
  * (`@jupyterlab/notebook/src/widget.ts:720`, `:762`, `:790`), going through the same content
  * factory (`widget.ts:1293-1303`) so any extension that customises cell widgets applies here too.
- * Two differences. The editor configuration is the static default
- * (`StaticNotebook.defaultEditorConfig`, `widget.ts:1327`) rather than the user's notebook
- * settings. And `placeholder` is `false`: the notebook panel creates cells as placeholders when
+ * The editor configuration is the static default (`StaticNotebook.defaultEditorConfig`,
+ * `widget.ts:1327`) rather than the user's notebook settings. `placeholder` is `false`: the
+ * notebook panel creates cells as placeholders when
  * windowing is on (`widget.ts:731`) and fills them in as they scroll into view; a node has no
  * scrolling container to drive that, so the editor is built at once.
  */
@@ -169,12 +168,16 @@ export function createCellWidget(ctx: ICellNodeContext, model: ICellModel): Cell
   }
 }
 /**
- * Fallback node content when a second editor on one model proves too fragile: outputs only.
+ * What a code cell's node shows when the `outputOnlyNodes` setting is on: the outputs, with no
+ * second editor on the cell's model.
  *
  * @param ctx - The node context, for the content factory and rendermime.
  * @param model - A code cell model; its `outputs` are shown.
  * @returns A `SimplifiedOutputArea` (`@jupyterlab/outputarea/src/widget.ts:889`), the output area
  * without the prompts, over the cell's output model.
+ *
+ * @remarks
+ * The fallback for when a second editor on one model proves too fragile.
  */
 export function createOutputOnlyWidget(ctx: ICellNodeContext, model: ICodeCellModel): OutputArea {
   return new SimplifiedOutputArea({
@@ -200,14 +203,14 @@ export const CellPort = (props: HandleProps): JSX.Element => <Handle {...props} 
  * @returns The node element.
  *
  * @remarks
- * Mounting a Lumino widget in React. `Widget.attach(widget, host)`
+ * Mounting a Lumino widget in React. The mount effect is a `useLayoutEffect` so that `detach`
+ * still finds the host node in the DOM: React runs a layout effect's cleanup during the commit
+ * that removes the component, while the host `div` is still there, whereas a passive `useEffect`
+ * cleanup runs after the DOM has been removed. `Widget.attach(widget, host)`
  * (`@lumino/widgets/src/widget.ts:1113`) inserts the widget's node into `host` and sends the
  * before/after-attach messages; it throws unless the host is itself in the document
  * (`widget.ts:1125`). `Widget.detach` (`widget.ts:1141`) likewise throws if the widget's node is no
- * longer connected (`widget.ts:1145-1146`). React runs a layout effect's cleanup during the commit
- * that removes the component, while the host `div` is still in the DOM, whereas a passive
- * `useEffect` cleanup runs after the DOM has been removed; hence `useLayoutEffect`, so that
- * `detach` finds the node where it expects it.
+ * longer connected (`widget.ts:1145-1146`).
  *
  * Resizing without a parent. A widget inside a Lumino layout receives resize messages from its
  * parent; this one has none, so the component sends `ResizeMessage.UnknownSize`
@@ -218,8 +221,7 @@ export const CellPort = (props: HandleProps): JSX.Element => <Handle {...props} 
  * next turn of the event loop instead of running a relayout inside the observer callback; the
  * editor's own measurement then batches repeated requests.
  *
- * Unmount order: stop observing, unregister, detach, then dispose the widget. Disposing a cell
- * widget never disposes the shared model, which belongs to the notebook.
+ * Disposing a cell widget never disposes the shared model, which belongs to the notebook.
  *
  * @see https://react.dev/reference/react/useLayoutEffect
  * @see https://reactflow.dev/api-reference/types/node-props

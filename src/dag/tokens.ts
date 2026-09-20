@@ -56,12 +56,7 @@ export type LayoutDirection = 'TB' | 'LR';
 /** The kernel channel `analyze_request` is sent on. */
 export type AnalyzeChannel = 'shell' | 'control';
 
-/**
- * User settings declared in `schema/plugin.json` under {@link PLUGIN_ID}; the schema supplies the defaults.
- *
- * @remarks
- * Read once per DAG view, when the view is created; a change applies to the next view opened.
- */
+/** User settings declared in `schema/plugin.json` under {@link PLUGIN_ID}; the schema supplies the defaults. */
 export interface IDagSettings {
   /** Direction of the automatic layout, unless the notebook remembers one. */
   layoutDirection: LayoutDirection;
@@ -69,7 +64,10 @@ export interface IDagSettings {
   maxZoom: number;
   /** Show only outputs in code cell nodes instead of a second editor on the same model. */
   outputOnlyNodes: boolean;
-  /** Where {@link AnalyzeChannel | analyze requests} go. */
+  /**
+   * Where {@link AnalyzeChannel | analyze requests} go; `ShellTransport` in `protocol.ts` has the
+   * trade-off between the channels.
+   */
   analyzeChannel: AnalyzeChannel;
 }
 /**
@@ -93,10 +91,9 @@ export function readSettings(composite: ReadonlyPartialJSONObject): IDagSettings
  *
  * @remarks
  * Wires are stored on their target only, as `inputs`, so each wire exists once and deleting a
- * cell removes its inbound wires with it; wires whose source cell is gone are ignored when read.
- * Position and size are stored so the layout survives reload. The interface extends
- * `PartialJSONObject` (`@lumino/coreutils/src/json.ts:68`) because metadata values have to be
- * JSON: the shared model keeps them in a Yjs map.
+ * cell removes its inbound wires with it. Position and size are stored so the layout survives
+ * reload. The interface extends `PartialJSONObject` (`@lumino/coreutils/src/json.ts:68`) because
+ * metadata values have to be JSON: the shared model keeps them in a Yjs map.
  */
 export interface IDagCellMetadata extends PartialJSONObject {
   /** Ids of the cells this cell depends on: one entry per inbound wire. */
@@ -156,12 +153,13 @@ export interface IDagGraphChange {
 }
 
 /**
- * The seam the reactive plugin will consume; the DAG view uses the concrete `DagGraphModel`.
+ * The graph of cells and wires that a scheduler runs over.
  *
  * @remarks
- * Everything a consumer needs to schedule runs: the cells, the wires between them, a change
- * signal, and the ephemeral execution state. Wires and cell ids are read from the notebook model
- * on every access, so the model is never out of date with the document.
+ * The seam the reactive plugin will consume; the DAG view uses the concrete `DagGraphModel`. An
+ * implementation answers `cellIds` and `wires` for the document as it stands at the call, caching
+ * only between changes it announces on `changed`, so a consumer never has to invalidate anything
+ * itself.
  */
 export interface IDagGraphModel extends IDisposable {
   /** The notebook model the graph is a view of. */
@@ -195,10 +193,10 @@ export type IDagTracker = IWidgetTracker<IDagDocument>;
  * The token under which the view plugin provides its tracker.
  *
  * @remarks
- * A `Token` (`@lumino/coreutils/src/token.ts:18`) is a typed identity: a plugin lists it under
- * `provides`, another under `requires` or `optional`, and the application passes the provided
- * value to the requiring plugin's `activate`. The name and type alias share a name on purpose,
- * the JupyterLab convention that lets `IDagTracker` be both the runtime token and the type.
+ * A `Token` (`@lumino/coreutils/src/token.ts:18`) is a typed identity; this one carries the
+ * tracker of open DAG views, so another plugin can list it and be handed the tracker. The token
+ * and the type alias share a name on purpose, the JupyterLab convention that lets `IDagTracker`
+ * be both the runtime token and the type.
  */
 export const IDagTracker = new Token<IDagTracker>(
   `${PLUGIN_ID_BASE}:IDagTracker`,
@@ -225,7 +223,7 @@ export const IDagGraphModelFactory = new Token<IDagGraphModelFactory>(
  * Metadata can be edited by hand, come from another version, or carry a coordinate that was
  * `NaN` when written: `JSON.stringify` turns `NaN` and `Infinity` into `null`, and a `null`
  * position reaches React Flow as a node with no numeric position, which breaks the layout maths
- * for every node. Checking `Number.isFinite` on the way in keeps that out of the canvas.
+ * for every node.
  */
 export function readCellMetadata(raw: ReadonlyPartialJSONObject | undefined): IDagCellMetadata {
   const inputs = Array.isArray(raw?.inputs) ? (raw!.inputs as string[]) : [];
