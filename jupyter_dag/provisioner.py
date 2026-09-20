@@ -16,7 +16,7 @@ PROVISIONER_NAME = "jupyter-dag-provisioner"
 
 
 class DagKernelProvisioner(LocalProvisioner):
-    """Behaves exactly like `LocalProvisioner` until the snapshot tier is built.
+    """Behaves like `LocalProvisioner` until the snapshot tier is built.
 
     Notes
     -----

@@ -1,17 +1,20 @@
-"""Kernelspec installer for the jupyter-dag kernel, after ipyflow's `kernel/install.py` (BSD-3-Clause, Stephen Macke).
+"""Kernelspec installer for the jupyter-dag kernel.
+
+The copy shipped in the wheel (`jupyter-config/kernels/jupyter-dag/kernel.json`, which pip installs
+into `share/jupyter/kernels`) has a bare `python` as `argv[0]`, which jupyter_client replaces with
+the *server's* interpreter (`jupyter_client/manager.py:396-402`), so it only works when server and
+kernel share an environment. Run this installer from the interpreter the kernel should use and,
+like `python -m ipykernel install`, it records that interpreter's `sys.executable` instead.
+`jupyter_dag/tests/test_protocol.py` checks that the shipped copy equals `kernel_json("python")`.
 
 A kernelspec is a directory with a `kernel.json` whose `argv` tells jupyter_client how to start the
 kernel. Ours starts the stock `ipykernel_launcher` and points `IPKernelApp.kernel_class` at
 `DagKernel`, so there is no launcher module to write; everything else comes from ipykernel's own
 kernelspec helpers.
 
-Run the installer from the interpreter the kernel should use: like `python -m ipykernel install`,
-it records that interpreter's `sys.executable` in `argv`, so the kernel works from a server in a
-different environment. The copy shipped in the wheel (`jupyter-config/kernels/jupyter-dag/kernel.json`,
-which pip installs into `share/jupyter/kernels`) has a bare `python` as `argv[0]` instead.
-jupyter_client replaces that with the *server's* interpreter (`jupyter_client/manager.py:396-402`),
-so the shipped copy only works when server and kernel share an environment.
-`jupyter_dag/tests/test_protocol.py` checks that it equals `kernel_json("python")`.
+References
+----------
+After ipyflow's `kernel/install.py` (BSD-3-Clause, Stephen Macke).
 """
 
 from __future__ import annotations
@@ -38,8 +41,8 @@ def kernel_json(executable: str | None = None) -> dict[str, Any]:
     Parameters
     ----------
     executable : str, optional
-        What to put in `argv[0]`. By default the running interpreter, which is the point of
-        running the installer from the right environment; `"python"` reproduces the shipped copy.
+        What to put in `argv[0]`. By default the running interpreter; `"python"` reproduces the
+        shipped copy.
 
     Returns
     -------
@@ -51,9 +54,10 @@ def kernel_json(executable: str | None = None) -> dict[str, Any]:
     `get_kernel_dict` (`ipykernel/kernelspec.py:59-72`) is what ipykernel writes for its own
     `python3` spec: `argv` from `make_ipkernel_cmd` (`kernelspec.py:31`), which uses
     `sys.executable` unless told otherwise, plus the debugger and encryption metadata. Two
-    arguments are added: `--IPKernelApp.kernel_class=...` selects this kernel, and
-    `-Xfrozen_modules=off` keeps debugpy usable, which ipykernel's installer also adds by default
-    (`kernelspec.py:178-180`).
+    arguments are added. `--IPKernelApp.kernel_class=...` selects this kernel: `kernel_class` is a
+    configurable trait of the launcher app (`ipykernel/kernelapp.py:126`) and `init_kernel`
+    instantiates whatever class it names (`kernelapp.py:620-623`). `-Xfrozen_modules=off` keeps
+    debugpy usable, which ipykernel's installer also adds by default (`kernelspec.py:178-180`).
     """
     spec = get_kernel_dict(
         extra_arguments=[f"--IPKernelApp.kernel_class={KERNEL_CLASS}"],

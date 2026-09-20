@@ -1,9 +1,8 @@
-"""DagKernel: the stock IPython kernel plus the three jupyter-dag protocol additions.
+"""DagKernel: the stock IPython kernel plus the jupyter-dag protocol additions.
 
-The frontend (`src/dag/protocol.ts`) sends messages over the kernel websocket; jupyter_server
-relays them to the kernel process untouched; ipykernel's dispatch loop looks the message type up in
-a handler table and awaits the handler. `DagKernel` adds one message type to that table and
-extends two existing ones:
+The frontend (`src/dag/protocol.ts`) sends messages over the kernel websocket, jupyter_server
+relays them to the kernel process untouched, and ipykernel dispatches each one to a handler by
+message type. `DagKernel` adds one message type to that table and extends two existing ones:
 
 1. `analyze_request` (shell and control channels): "which names does each of these cells define
    and reference?" Answered by `jupyter_dag.analysis.analyze_cells` and sent back as
@@ -13,21 +12,14 @@ extends two existing ones:
 3. `execute_reply` gains `namespace_delta` (`{"added": [...], "removed": [...]}`), the set
    difference of the user namespace before and after the cell ran.
 
-The kernel advertises all of them as JEP 92 `supported_features` strings in `kernel_info_reply`
-(`DagKernel.kernel_info`), so a frontend can feature-detect before sending anything new.
+The field shapes are in `jupyter_dag.protocol`, and `kernel_info` advertises the additions as
+`supported_features`.
 
-There are two ways to get this kernel. A kernelspec launches the stock `ipykernel_launcher` with
-`--IPKernelApp.kernel_class=jupyter_dag.kernel.kernel.DagKernel`: `IPKernelApp.kernel_class` is
-a configurable trait (`ipykernel/kernelapp.py:126`) and `init_kernel` instantiates whatever class
-it names (`kernelapp.py:620-623`), so no launcher module of our own is needed. The wheel ships one
-such spec and `jupyter_dag.kernel.install` writes one for any interpreter. The other way is
-`%load_ext jupyter_dag` inside an already running stock kernel: `load_ipython_extension` at the
-bottom of this file swaps the live kernel's class. That path exists so the prototype can be tried
-without installing a kernelspec.
-
-The same payloads are also reachable over a comm target (`jupyter_dag.kernel.comm`), which is the
-no-protocol-change transport: it works on any frontend that can open a comm, at the price of not
-being a real message type.
+There are two ways to get this kernel. A kernelspec selects this class for the stock
+`ipykernel_launcher` (`jupyter_dag.kernel.install`). Or `%load_ext jupyter_dag` inside an already
+running stock kernel swaps the live kernel's class (`load_ipython_extension`, at the bottom of this
+file), which lets the prototype be tried without installing a kernelspec. The same payloads are
+also reachable over a comm target (`jupyter_dag.kernel.comm`), the no-protocol-change transport.
 """
 
 from __future__ import annotations
@@ -59,19 +51,8 @@ class DagKernel(IPythonKernel):
 
     Notes
     -----
-    How a new message type gets a handler. `Kernel.__init__` (`ipykernel/kernelbase.py:312-317`)
-    builds the two dispatch tables from class-level lists::
-
-        for msg_type in self.msg_types:
-            self.shell_handlers[msg_type] = getattr(self, msg_type)
-        for msg_type in self.control_msg_types:
-            self.control_handlers[msg_type] = getattr(self, msg_type)
-
-    The tables are plain dicts and are never rebuilt, so `_init_dag` adds `analyze_request` to
-    both of them directly, after construction. That is also how ipykernel itself adds the comm
-    handlers (`ipykernel/ipkernel.py:163-165`), and it is the one mechanism that works both for a
-    kernel constructed as this class and for a running kernel that `load_ipython_extension`
-    converts, whose tables were filled by its old class.
+    Handlers are registered per instance, in `_init_dag`, because `load_ipython_extension`
+    converts kernels whose handler tables another class filled.
     """
 
     implementation = "jupyter-dag"
@@ -90,6 +71,17 @@ class DagKernel(IPythonKernel):
 
         Notes
         -----
+        `Kernel.__init__` (`ipykernel/kernelbase.py:312-317`) fills the two dispatch tables once,
+        from class-level lists::
+
+            for msg_type in self.msg_types:
+                self.shell_handlers[msg_type] = getattr(self, msg_type)
+            for msg_type in self.control_msg_types:
+                self.control_handlers[msg_type] = getattr(self, msg_type)
+
+        The tables are plain dicts and are never rebuilt, so this adds `analyze_request` to both
+        of them afterwards, the way ipykernel adds its own comm handlers (`ipykernel/ipkernel.py:163-165`).
+
         `self.comm_manager` is the process-wide `CommManager` that `IPythonKernel.__init__`
         installs (`ipykernel/ipkernel.py:159`) and that ipywidgets and every other comm user share.
         Registering a target on it means "when a frontend opens a comm named `jupyter-dag`, call
@@ -104,16 +96,13 @@ class DagKernel(IPythonKernel):
 
         `Kernel.kernel_info` (`ipykernel/kernelbase.py:992-1008`) is a plain property that
         assembles the reply and fills `supported_features` from hard-coded checks ("kernel
-        subshells", "debugger"). There is no list to append to and no hook to call, so overriding
-        the property and extending its result is the only way to advertise more features. The
-        strings follow ipykernel's spelling convention, lower case and space separated:
-        `jupyter_dag.protocol.ALL_FEATURES`.
+        subshells", "debugger"). With no list to append to and no hook to call, this override
+        extends the assembled result.
 
         Returns
         -------
         dict
-            The base reply with `"cell analysis"`, `"namespace delete"`, `"namespace set"` and
-            `"namespace delta"` added to `supported_features`.
+            The base reply with `jupyter_dag.protocol.ALL_FEATURES` added to `supported_features`.
         """
         info = super().kernel_info
         info["supported_features"].extend(ALL_FEATURES)
@@ -144,15 +133,13 @@ class DagKernel(IPythonKernel):
         and `ident` routes it to the right connected client. `is_complete_request`
         (`kernelbase.py:1113`) is the base-class handler this one is modelled on.
 
-        On the control channel the handler runs on the control thread (`kernelbase.py:156`),
-        possibly while the shell thread is inside a cell. That is safe because analysis touches no
-        shell state: `jupyter_dag.analysis` parses the source with its own stateless
-        `TransformerManager` and never reads the namespace.
+        On the control channel the handler runs on the control thread (`control_stream` is bound
+        to that thread's loop, `ipykernel/kernelapp.py:613`), possibly while the shell thread is
+        inside a cell. That is safe because analysis reads no shell state (`jupyter_dag.analysis`).
 
-        A reply is sent even when analysis raises. ipykernel only logs a handler's exception, and
-        the frontend future resolves only after it has seen both the reply and the idle status
-        (`@jupyterlab/services/lib/kernel/future.js:250-262`), so a missing reply would hang the
-        caller forever.
+        This replies even when analysis raises: ipykernel only logs a handler's exception, and the
+        frontend future resolves only after it sees both the reply and the idle status
+        (`@jupyterlab/services/lib/kernel/future.js:250-262`), so a missing reply hangs the caller.
         """
         if not self.session:
             return
@@ -165,8 +152,8 @@ class DagKernel(IPythonKernel):
     async def do_execute(self, **kwargs: Any) -> dict[str, Any]:
         """Run a cell as `IPythonKernel` does, wrapped in the namespace operations.
 
-        Order of events: snapshot the visible namespace, apply `namespace_delete` and
-        `namespace_set` from the request, run the code, diff the namespace, attach the diff.
+        The namespace is snapshotted before `namespace_delete` and `namespace_set` apply, so their
+        effects show up in the delta too.
 
         Parameters
         ----------
@@ -177,7 +164,8 @@ class DagKernel(IPythonKernel):
         Returns
         -------
         dict
-            The `execute_reply` content from `IPythonKernel`, plus `namespace_delta`.
+            The `execute_reply` content from `IPythonKernel`, plus `namespace_delta`
+            (`jupyter_dag.protocol.NamespaceDelta`, which shows a purge request and its reply).
 
         Notes
         -----
@@ -192,21 +180,11 @@ class DagKernel(IPythonKernel):
         and `namespace_set` are fetched from `self.get_parent()` (`kernelbase.py:694`), which
         returns the message currently being handled on this channel.
 
-        Why the reply can simply carry `namespace_delta`. The dict this method returns is sent
-        verbatim as the `execute_reply` content (`kernelbase.py:859`). Adding a key adds a field to
-        the protocol message; clients that do not know it ignore it, and every connected client
-        gets it, whichever of them sent the request. The frontend reads it off every
-        `execute_reply` it sees, so there is no second delivery path.
-
-        Examples
-        --------
-        A frontend that wants "purge these names, run nothing" sends::
-
-            {"code": "", "silent": True, "store_history": False, "namespace_delete": ["df", "model"]}
-
-        and gets back::
-
-            {"status": "ok", ..., "namespace_delta": {"added": [], "removed": ["df", "model"]}}
+        Why the reply can carry `namespace_delta`. The dict this method returns is sent verbatim
+        as the `execute_reply` content (`kernelbase.py:859`). Adding a key adds a field to the
+        protocol message; clients that do not know it ignore it, and every connected client gets
+        it, whichever of them sent the request. The frontend reads it off every `execute_reply` it
+        sees, so there is no second delivery path.
         """
         content = (self.get_parent() or {}).get("content", {})
         before = visible_names(self.shell)
@@ -217,14 +195,14 @@ class DagKernel(IPythonKernel):
         return reply
 
 
-# ---- runtime injection: `%load_ext jupyter_dag` on a stock kernel (after ipyflow kernel.py:137-150) ----
+# ---- runtime injection: `%load_ext jupyter_dag` on a stock kernel ----
 
 
 def load_ipython_extension(ipy: InteractiveShell) -> None:
     """Turn the running stock kernel into a DagKernel; the target of `%load_ext jupyter_dag`.
 
     `%load_ext` imports the named module and calls its `load_ipython_extension(shell)`
-    (`IPython/core/extensions.py:53`). `jupyter_dag/__init__.py` forwards here lazily so that
+    (`IPython/core/extensions.py:128`). `jupyter_dag/__init__.py` forwards here lazily so that
     importing the package never imports ipykernel.
 
     Parameters
@@ -242,13 +220,12 @@ def load_ipython_extension(ipy: InteractiveShell) -> None:
     class in the MRO: `class GeneratedDagKernel(DagKernel, prev)`. After the swap every method
     lookup finds the DagKernel overrides first (`do_execute`, `kernel_info`, `analyze_request`),
     and the base class's `__init__`-time state (session, sockets, comm manager) is untouched
-    because no `__init__` runs. What `__init__` would have done is repeated by calling
-    `DagKernel._init_dag`, which fills the handler tables and registers the comm target.
+    because no `__init__` runs. `DagKernel._init_dag` stands in for it, filling the handler tables
+    and registering the comm target.
 
     The generated class also records the class it replaced, as `_dag_prev_class`, so
-    `unload_ipython_extension` can put it back. Storing it on the class rather than in a module
-    global keeps the fact with the swap: each `%load_ext` makes a fresh class with its own
-    pointer, and once the swap is undone the attribute stops resolving by itself.
+    `unload_ipython_extension` can put it back. Each `%load_ext` makes a fresh class with its own
+    pointer, so undoing the swap stops the attribute resolving.
 
     Limitation. `kernel_info_reply` was answered when the frontend connected, before this ran, so
     the frontend's cached `supported_features` do not include the jupyter-dag strings. The

@@ -51,23 +51,23 @@ class AnalyzeCellInput(TypedDict):
 class AnalyzedCellOk(TypedDict):
     """Analysis result for a cell that parsed, or that was a cell magic and got no analysis.
 
+    The derivation rules are in `jupyter_dag.analysis.analyze_source`.
+
     Attributes
     ----------
     cell_id : str
         The id from the matching `AnalyzeCellInput`.
     status : {"ok", "opaque"}
-        `"ok"` for analysed source; `"opaque"` for a `%%` cell magic, whose body IPython hands to
-        the magic as a string, so nothing can be said about it and the name lists are empty.
+        `"ok"` for analysed source; `"opaque"` for a `%%` cell magic, whose name lists are empty.
     defined : list of str
-        Global names the cell binds: assignments, imports, `def` and `class` at module level, and
-        names assigned under a `global` declaration inside functions. Sorted.
+        Global names the cell binds. Sorted.
     referenced : list of str
         Global names the cell reads without defining them, including builtins. Sorted.
     deleted : list of str
         Names in `del` statements. Sorted.
     dynamic : bool
         True when the cell can change names in ways static analysis cannot see: a star import or
-        a call to `exec`, `eval`, `globals`, `locals`, `vars`, `__import__` or `run_cell_magic`.
+        a call to any of `jupyter_dag.analysis.DYNAMIC_CALLS`.
     """
 
     cell_id: str
@@ -88,7 +88,7 @@ class AnalyzedCellError(TypedDict):
     status : {"error"}
         Always `"error"`.
     ename : str
-        The exception class name, normally `SyntaxError`.
+        The exception class name: `SyntaxError` or a subclass such as `IndentationError`.
     evalue : str
         The exception message.
     """
@@ -106,12 +106,25 @@ AnalyzedCell = AnalyzedCellOk | AnalyzedCellError
 class NamespaceDelta(TypedDict):
     """The `namespace_delta` field of `execute_reply` content.
 
+    A set difference of the visible names before and after the cell ran, so a name rebound to a
+    new value appears in neither list.
+
     Attributes
     ----------
     added : list of str
         Visible names bound after the cell ran that were not bound before. Sorted.
     removed : list of str
         Visible names bound before the cell ran that are gone afterwards. Sorted.
+
+    Examples
+    --------
+    A frontend that wants "purge these names, run nothing" sends an `execute_request` with::
+
+        {"code": "", "silent": True, "store_history": False, "namespace_delete": ["df", "model"]}
+
+    and gets back::
+
+        {"status": "ok", ..., "namespace_delta": {"added": [], "removed": ["df", "model"]}}
     """
 
     added: list[str]
