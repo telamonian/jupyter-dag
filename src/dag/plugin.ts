@@ -103,7 +103,12 @@ import type { IDagRunOptions } from './executor';
  * commands take core's `args.toolbar` convention: the schema passes it for the toolbar items,
  * which belong to a document, while from the palette the DAG view has to be the shell's current
  * widget, since the tracker's current widget outlives its focus. Interrupt and restart are not
- * in the palette, where core's notebook entries already reach the same kernel.
+ * in the palette, where core's notebook entries already reach the same kernel. `undo` and `redo`
+ * call the shared model's own `undo` and `redo`, as `NotebookActions.undo` does
+ * (`@jupyterlab/notebook/src/actions.tsx:1666-1674`), so one `Z` reverts one DAG edit (a wire, a
+ * move, a cell) or one notebook edit alike; the schema binds `Z` and `Shift Z` to them while focus
+ * is inside a `DagPanel` but not in an editor or input, the DAG counterpart of the notebook's
+ * command-mode bindings.
  *
  * Translation. `translator.load('jupyter-dag')` (`ITranslator.load`,
  * `@jupyterlab/rendermime-interfaces/src/index.ts:757`) selects this extension's own domain;
@@ -263,11 +268,28 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
         }
       }
     });
+    commands.addCommand(CommandIDs.undo, {
+      label: trans.__('Undo DAG Edit'),
+      caption: trans.__('Undo the last change to the notebook'),
+      isEnabled: args => isActive(args) && !!tracker.currentWidget?.context.model.sharedModel.canUndo(),
+      execute: () => tracker.currentWidget?.context.model.sharedModel.undo()
+    });
+    commands.addCommand(CommandIDs.redo, {
+      label: trans.__('Redo DAG Edit'),
+      caption: trans.__('Redo the last undone change to the notebook'),
+      isEnabled: args => isActive(args) && !!tracker.currentWidget?.context.model.sharedModel.canRedo(),
+      execute: () => tracker.currentWidget?.context.model.sharedModel.redo()
+    });
     if (palette) {
       const category = trans.__('Notebook Operations');
-      [CommandIDs.open, CommandIDs.runAll, CommandIDs.autoLayout, CommandIDs.addCell].forEach(command =>
-        palette.addItem({ command, category })
-      );
+      [
+        CommandIDs.open,
+        CommandIDs.runAll,
+        CommandIDs.autoLayout,
+        CommandIDs.addCell,
+        CommandIDs.undo,
+        CommandIDs.redo
+      ].forEach(command => palette.addItem({ command, category }));
     }
     return tracker;
   }

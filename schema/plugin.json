@@ -1,6 +1,17 @@
 {
   "jupyter.lab.transform": true,
-  "jupyter.lab.shortcuts": [],
+  "jupyter.lab.shortcuts": [
+    {
+      "command": "jupyter-dag:undo",
+      "keys": ["Z"],
+      "selector": ".jp-DagPanel:focus-within:not(:has(.cm-focused)):not(:has(input:focus)):not(:has(textarea:focus)):not(:has(select:focus))"
+    },
+    {
+      "command": "jupyter-dag:redo",
+      "keys": ["Shift Z"],
+      "selector": ".jp-DagPanel:focus-within:not(:has(.cm-focused)):not(:has(input:focus)):not(:has(textarea:focus)):not(:has(select:focus))"
+    }
+  ],
   "jupyter.lab.toolbars": {
     "Notebook": [
       {

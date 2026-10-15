@@ -81,8 +81,10 @@ edge: the built-in bezier path plus a remove button at its upper end while selec
 ## Plugins and settings
 
 `src/dag/plugin.ts` has three plugins. The view plugin registers the widget factory, tracks open
-views for layout restore, adds the open, add-cell, run, auto-layout, interrupt and restart
-commands, registers the toolbar items that are widgets rather than commands (the new-cell type
+views for layout restore, adds the open, add-cell, run, auto-layout, interrupt, restart, undo
+and redo commands (`Z` and `Shift Z` undo and redo the notebook's last change while focus is in
+the DAG view but not in an editor), registers the toolbar items that are widgets rather than
+commands (the new-cell type
 dropdown, the kernel-name button and the execution indicator; `src/dag/toolbar.tsx`), and loads
 the settings; it creates the toolbar factory first because the schema's `jupyter.lab.transform`
 flag makes `settingRegistry.load` fail until a transformer exists. The graph-model plugin

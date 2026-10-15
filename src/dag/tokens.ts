@@ -60,6 +60,10 @@ export namespace CommandIDs {
   export const interruptKernel = 'jupyter-dag:interrupt-kernel';
   /** Restart that kernel, after the usual confirmation dialog. */
   export const restartKernel = 'jupyter-dag:restart-kernel';
+  /** Undo the last change to the notebook; `Z` in the DAG view. */
+  export const undo = 'jupyter-dag:undo';
+  /** Redo the last undone change; `Shift Z` in the DAG view. */
+  export const redo = 'jupyter-dag:redo';
 }
 
 /** Layout direction: top-to-bottom or left-to-right, as dagre spells `rankdir`. */

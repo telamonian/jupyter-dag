@@ -244,7 +244,9 @@ export interface INodeButtonProps {
  * web component (`@jupyterlab/ui-components/src/components/toolbar.tsx:4`) and can only be sized
  * through `::part`. The click does not propagate: the toolbars are React portals, and a synthetic
  * click would still bubble into React Flow's node or edge click handler, which raises error 012
- * or 016 once the element the button removed is gone.
+ * or 016 once the element the button removed is gone. After the action, focus moves to the panel:
+ * a button that removed its own node or edge is unmounted, and focus would otherwise fall to
+ * `body`, outside the selector of the view's `Z` undo binding.
  *
  * @see https://reactflow.dev/error
  */
@@ -258,6 +260,10 @@ export function NodeButton({ icon, title, onClick, disabled = false, small = fal
       onClick={event => {
         event.stopPropagation();
         onClick();
+        const panel = event.currentTarget.closest('.jp-DagPanel');
+        if (panel instanceof HTMLElement) {
+          panel.focus(); // the button may be gone now; keep focus in the view for its `Z` binding
+        }
       }}
     >
       <icon.react tag="span" elementSize={small ? 'small' : 'normal'} />

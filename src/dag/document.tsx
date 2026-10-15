@@ -21,6 +21,7 @@ import { CodeCell, isCodeCellModel } from '@jupyterlab/cells';
 import type { Cell } from '@jupyterlab/cells';
 import { nullTranslator } from '@jupyterlab/translation';
 import type { ITranslator } from '@jupyterlab/translation';
+import type { Message } from '@lumino/messaging';
 import { Signal } from '@lumino/signaling';
 import { DagCanvas } from './canvas';
 import type { ICellNodeContext } from './cellnode';
@@ -55,6 +56,7 @@ export class DagPanel extends ReactWidget {
   constructor(options: DagPanel.IOptions) {
     super();
     this.addClass('jp-DagPanel');
+    this.node.tabIndex = -1; // focusable, so the view's keyboard shortcuts have somewhere to land
     this.context = options.context;
     this.settings = options.settings;
     this._mimeTypeService = options.mimeTypeService;
@@ -163,6 +165,22 @@ export class DagPanel extends ReactWidget {
     }
     const panel = this._notebookTracker.find(p => p.context === this.context);
     return panel?.content.widgets.find(c => c.model.id === cellId);
+  }
+  /**
+   * Focus the panel's node, so the DAG view's keyboard shortcuts apply.
+   *
+   * @param msg - The activate request.
+   *
+   * @remarks
+   * `MainAreaWidget` forwards its own activation to its content
+   * (`@jupyterlab/apputils/src/mainareawidget.ts:175-177`, `:268-279`), so this runs when the document becomes
+   * the current widget. With `tabIndex` -1 on the node, a click on anything unfocusable inside the
+   * canvas also lands focus on the panel (the browser focuses the closest focusable ancestor), and
+   * the `Z` and `Shift Z` bindings in `schema/plugin.json`, whose selector is a `DagPanel` with
+   * focus inside it and no focused editor or input, hold after any click on the canvas.
+   */
+  protected onActivateRequest(msg: Message): void {
+    this.node.focus();
   }
   /**
    * Render the canvas, or nothing until the notebook model has loaded.
