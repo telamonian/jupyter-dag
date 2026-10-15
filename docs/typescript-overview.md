@@ -46,7 +46,11 @@ orders it, and runs one cell at a time so that each cell's purge precedes its `e
 the shell channel and a failure stops the run. `analyzeAll` sends the whole notebook in one
 request and keeps the results; the purge unbinds a cell's `defined` names before it re-runs, on
 kernels that advertise the feature. It also watches `NotebookActions`' signals so a cell run from
-the notebook panel marks its dependents stale too.
+the notebook panel marks its dependents stale too, and the session's signals so a kernel restart
+or swap marks every node stale.
+
+`src/dag/cells.ts` inserts, deletes and clears cells without a notebook widget, mirroring the
+shared-model bodies of the `NotebookActions` functions, which need one.
 
 ## The view
 
@@ -69,18 +73,24 @@ side column, after marimo.
 content factory over the shared cell model, attached inside a React-owned `div` in a layout effect
 (so detach happens while the host is still in the DOM), resized by hand since it has no Lumino
 parent, with an output-only fallback for code cells. Each node reads its own state from the graph
-model, so a state change re-renders one node rather than the array.
+model, so a state change re-renders one node rather than the array. A selected node shows four
+icon buttons under it (run downstream, remove cell, remove edges, clear output), and the
+stylesheet highlights the outline wherever a drag could start. `src/dag/wireedge.tsx` is the
+edge: the built-in bezier path plus a remove button at its upper end while selected.
 
 ## Plugins and settings
 
-`src/dag/plugin.ts` has two plugins. The view plugin registers the widget factory, tracks open
-views for layout restore, adds the open, run-all, run-downstream, run-upstream and auto-layout
-commands, and loads the settings; it creates the toolbar factory first because the schema's
-`jupyter.lab.transform` flag makes `settingRegistry.load` fail until a transformer exists. The
-graph-model plugin provides `IDagGraphModelFactory` on its own so the reactive plugin can require
-it without activating the view. `schema/plugin.json` declares the settings (layout direction,
-max zoom, output-only nodes, analyze channel), the notebook and DAG toolbars, and the View menu
-entry, all bound to the view plugin's id.
+`src/dag/plugin.ts` has three plugins. The view plugin registers the widget factory, tracks open
+views for layout restore, adds the open, add-cell, run, auto-layout, interrupt and restart
+commands, registers the toolbar items that are widgets rather than commands (the new-cell type
+dropdown, the kernel-name button and the execution indicator; `src/dag/toolbar.tsx`), and loads
+the settings; it creates the toolbar factory first because the schema's `jupyter.lab.transform`
+flag makes `settingRegistry.load` fail until a transformer exists. The graph-model plugin
+provides `IDagGraphModelFactory` on its own so the reactive plugin can require it without
+activating the view. The kernel-status plugin lets the status bar's kernel item show the kernel
+of a current DAG tab. `schema/plugin.json` declares the settings (layout direction, max zoom,
+output-only nodes, analyze channel), the notebook and DAG toolbars, and the View menu entry, all
+bound to the view plugin's id.
 
 ## Tooling
 

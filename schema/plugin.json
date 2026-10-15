@@ -11,14 +11,55 @@
     ],
     "DAG": [
       {
+        "name": "cellType",
+        "rank": 1
+      },
+      {
+        "name": "addCell",
+        "command": "jupyter-dag:add-cell",
+        "rank": 2,
+        "args": {
+          "toolbar": true
+        }
+      },
+      {
         "name": "runDag",
         "command": "jupyter-dag:run-all",
         "rank": 10
       },
       {
+        "name": "interrupt",
+        "command": "jupyter-dag:interrupt-kernel",
+        "rank": 11,
+        "args": {
+          "toolbar": true
+        }
+      },
+      {
+        "name": "restart",
+        "command": "jupyter-dag:restart-kernel",
+        "rank": 12,
+        "args": {
+          "toolbar": true
+        }
+      },
+      {
         "name": "autoLayout",
         "command": "jupyter-dag:auto-layout",
         "rank": 20
+      },
+      {
+        "name": "spacer",
+        "type": "spacer",
+        "rank": 100
+      },
+      {
+        "name": "kernelName",
+        "rank": 1000
+      },
+      {
+        "name": "executionProgress",
+        "rank": 1002
       }
     ]
   },

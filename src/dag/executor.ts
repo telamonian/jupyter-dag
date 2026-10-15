@@ -15,6 +15,7 @@ import type { INotebookCellExecutor, Notebook } from '@jupyterlab/notebook';
 import { CodeCell } from '@jupyterlab/cells';
 import type { Cell } from '@jupyterlab/cells';
 import type { ISessionContext } from '@jupyterlab/apputils';
+import type { Kernel, Session } from '@jupyterlab/services';
 import type { ITranslator } from '@jupyterlab/translation';
 import { Signal } from '@lumino/signaling';
 import type { IDisposable } from '@lumino/disposable';
@@ -56,6 +57,15 @@ export interface IDagRunOptions {
  * awaited before the next is sent, because the purge for a cell has to be sent before that cell's
  * `execute_request` (`IDagTransport.namespaceDelete` in `protocol.ts` has the ordering rule), and
  * because stopping at the first failure needs the result before deciding.
+ *
+ * Why the session's signals are watched. A restart, a kernel change or a shutdown empties the
+ * namespace, so every code cell's node is marked stale on `statusChanged` with `'restarting'`,
+ * `'autorestarting'` or `'dead'` (`@jupyterlab/apputils/src/sessioncontext.tsx:111`) and on any
+ * `kernelChanged` that has an old kernel (`sessioncontext.tsx:91`): a swap, a shutdown, a culled
+ * session. The first start, with no old kernel, is skipped, so reopening a view on a running
+ * kernel changes nothing. Markdown and raw cells read no namespace and are left alone. An
+ * interrupt needs nothing: the interrupted cell's reply is an error, `onCellExecuted` records it
+ * and the run stops.
  */
 export class DagExecutor implements IDisposable {
   /**
@@ -73,6 +83,8 @@ export class DagExecutor implements IDisposable {
     NotebookActions.executionScheduled.connect(this._onScheduled, this);
     NotebookActions.selectionExecuted.connect(this._onSelectionExecuted, this);
     NotebookActions.outputCleared.connect(this._onOutputCleared, this);
+    this._sessionContext.statusChanged.connect(this._onStatusChanged, this);
+    this._sessionContext.kernelChanged.connect(this._onKernelChanged, this);
   }
 
   /**
@@ -133,7 +145,8 @@ export class DagExecutor implements IDisposable {
    * @returns True when the cell ran successfully.
    *
    * @remarks
-   * The purge is sent only for a code cell and only when the kernel advertises
+   * A cell deleted after the run started is skipped rather than failed; its dependents still run
+   * in order. The purge is sent only for a code cell and only when the kernel advertises
    * {@link FEATURE_NAMESPACE_DELETE}. `notebook` in the options is the notebook *model*, despite
    * the name (`@jupyterlab/notebook/src/tokens.ts:157`), and `notebookConfig` takes the defaults
    * (`StaticNotebook.defaultNotebookConfig`, `@jupyterlab/notebook/src/widget.ts:1462`). A
@@ -141,6 +154,9 @@ export class DagExecutor implements IDisposable {
    * recorded through the `onCellExecuted` callback before the rethrow.
    */
   private async _runOne(cellId: string, remaining: ReadonlySet<string>): Promise<boolean> {
+    if (!this._graph.findCell(cellId)) {
+      return true; // deleted since the run started: skip it and keep going
+    }
     const cell = this._widgetFor(cellId);
     if (!cell) {
       this._graph.setState(cellId, 'error');
@@ -225,12 +241,31 @@ export class DagExecutor implements IDisposable {
       this._graph.markStale([args.cell.model.id]);
     }
   }
+  private _onStatusChanged(_: unknown, status: Kernel.Status): void {
+    if (status === 'restarting' || status === 'autorestarting' || status === 'dead') {
+      this._markCodeCellsStale();
+    }
+  }
+  private _onKernelChanged(_: unknown, { oldValue }: Session.ISessionConnection.IKernelChangedArgs): void {
+    if (oldValue) {
+      this._markCodeCellsStale();
+    }
+  }
+  private _markCodeCellsStale(): void {
+    const ids: string[] = [];
+    for (const cell of this._graph.notebook.cells) {
+      if (cell.type === 'code') {
+        ids.push(cell.id);
+      }
+    }
+    this._graph.markStale(ids);
+  }
 
   /** Whether {@link DagExecutor.dispose} has been called. */
   get isDisposed(): boolean {
     return this._isDisposed;
   }
-  /** Disconnect from the `NotebookActions` signals. */
+  /** Disconnect from the `NotebookActions` and session signals. */
   dispose(): void {
     if (this._isDisposed) {
       return;

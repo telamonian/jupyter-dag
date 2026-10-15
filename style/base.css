@@ -4,43 +4,87 @@
     https://jupyterlab.readthedocs.io/en/stable/developer/css.html
 */
 
-/* DAG document view (src/dag/document.tsx, canvas.tsx, cellnode.tsx) */
+/* DAG document view (src/dag/document.tsx, canvas.tsx, cellnode.tsx, wireedge.tsx) */
 .jp-DagPanel,
 .jp-DagPanel .react-flow {
   height: 100%;
 }
 
+/*
+ * The node's colour follows its execution state through a custom property, so the hover rule
+ * below derives a lighter shade of whichever colour applies. Mixing towards white is lighter in
+ * both themes; the theme's `-color2` variants are not (`--jp-border-color2` is darker in the
+ * dark theme). The 4px padding is a grab gutter: React Flow starts a drag anywhere in the node
+ * except inside `.nodrag` (the editor host), and without the gutter only the header strip and
+ * the 1px border were grabbable.
+ */
 .jp-DagCellNode {
+  --jp-dag-node-color: var(--jp-border-color1);
+  --jp-dag-node-hover-color: color-mix(in srgb, var(--jp-dag-node-color) 85%, white);
+
   min-width: 240px;
+  padding: 0 4px 4px;
   background: var(--jp-layout-color1);
-  border: 1px solid var(--jp-border-color1);
+  border: 1px solid var(--jp-dag-node-color);
   border-radius: var(--jp-border-radius);
 }
 
 .jp-DagCellNode-stale {
-  border-color: var(--jp-warn-color1);
+  --jp-dag-node-color: var(--jp-warn-color1);
 }
 
 .jp-DagCellNode-queued {
-  border-color: var(--jp-info-color1);
+  --jp-dag-node-color: var(--jp-info-color1);
 }
 
 .jp-DagCellNode-error {
-  border-color: var(--jp-error-color1);
+  --jp-dag-node-color: var(--jp-error-color1);
+}
+
+/*
+ * Highlight the outline while the pointer is somewhere a click-and-hold would start a drag:
+ * the node minus its `.nodrag` parts (editor host, ports, resizer controls), which is exactly
+ * the set React Flow's drag filter excludes. The ring is a box-shadow so the node does not
+ * change size; it stays on while dragging, when the pointer can outrun the node.
+ */
+.react-flow__node.dragging > .jp-DagCellNode,
+.jp-DagCellNode:hover:not(:has(.nodrag:hover)) {
+  border-color: var(--jp-dag-node-hover-color);
+  box-shadow: 0 0 0 1px var(--jp-dag-node-hover-color);
 }
 
 .jp-DagCellNode-dragHandle {
-  height: 8px;
+  height: 12px;
   cursor: grab;
   background: var(--jp-layout-color2);
 }
 
+.react-flow__node.dragging .jp-DagCellNode-dragHandle {
+  cursor: grabbing;
+}
+
 .jp-DagCellNode-host {
   overflow: visible;
+  cursor: default;
 }
 
 .jp-DagCellNode-port {
   background: var(--jp-brand-color1);
+}
+
+/* The per-node toolbar React Flow portals below a selected node; it ships no styling of its own. */
+.jp-DagCellNode-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: var(--jp-border-radius);
+  box-shadow: var(--jp-elevation-z2);
+}
+
+.jp-DagNodeButton {
+  padding: 0 4px;
 }
 
 /* React Flow puts the edge className on the <g>; the path is its child. */
@@ -50,4 +94,25 @@
 
 .jp-DagPanel .jp-DagWire.selected .react-flow__edge-path {
   stroke: var(--jp-brand-color1);
+}
+
+/*
+ * The remove button of a selected edge. The toolbar box is anchored at the edge's upper end and
+ * scaled by 1/zoom, so the padding is in screen pixels: 8px to the right of the wire and 3px
+ * away from the node the end belongs to.
+ */
+.jp-DagWire-toolbar-top {
+  padding: 3px 0 0 8px;
+}
+
+.jp-DagWire-toolbar-bottom {
+  padding: 0 0 3px 8px;
+}
+
+.jp-DagWire-toolbar .jp-DagNodeButton {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 1px;
+  background: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color2);
 }

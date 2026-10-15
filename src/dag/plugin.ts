@@ -10,8 +10,11 @@ import { ILayoutRestorer } from '@jupyterlab/application';
 import type { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
 import {
   ICommandPalette,
+  IKernelStatusModel,
   ISessionContextDialogs,
   IToolbarWidgetRegistry,
+  SessionContextDialogs,
+  Toolbar,
   WidgetTracker,
   createToolbarFactory
 } from '@jupyterlab/apputils';
@@ -21,9 +24,10 @@ import { IEditorServices } from '@jupyterlab/codeeditor';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { ITranslator, nullTranslator } from '@jupyterlab/translation';
-import { runIcon } from '@jupyterlab/ui-components';
+import { addIcon, refreshIcon, runIcon, stopIcon } from '@jupyterlab/ui-components';
 import type { ReadonlyPartialJSONObject } from '@lumino/coreutils';
 import { DagDocument, DagWidgetFactory, dagIcon } from './document';
+import { CellTypeSelect, createExecutionIndicator } from './toolbar';
 import { DagGraphModel } from './wiring';
 import {
   CommandIDs,
@@ -33,6 +37,7 @@ import {
   PLUGIN_ID,
   PLUGIN_ID_BASE,
   TRACKER_NAMESPACE,
+  isDagCellType,
   readSettings
 } from './tokens';
 import type { IDagRunOptions } from './executor';
@@ -55,6 +60,16 @@ import type { IDagRunOptions } from './executor';
  * Why it has the template's plugin id. {@link PLUGIN_ID} is the id `schema/plugin.json` is bound
  * to; that schema holds the notebook and DAG toolbars, the View menu entry and the settings.
  *
+ * Toolbar items. `cellType`, `kernelName` and `executionProgress` have no command, so they are
+ * registered as factories on `IToolbarWidgetRegistry` (`addFactory`,
+ * `@jupyterlab/apputils/src/tokens.ts:363-367`) under the DAG factory name, before the toolbar
+ * factory is created: a listed item with neither command nor factory renders as an empty
+ * `CommandToolbarButton` (`@jupyterlab/apputils/src/toolbar/registry.ts:63-72`). Each factory
+ * receives the `DagDocument` that `ABCWidgetFactory.createNew` hands to `setToolbar`
+ * (`@jupyterlab/docregistry/src/default.ts:465-476`). The add, interrupt and restart buttons are
+ * commands, like core's `panel.json` items; core's `notebook:*` commands cannot be listed here
+ * because they act on, and focus, the notebook tracker's current panel.
+ *
  * What each token is for. `INotebookTracker` finds the notebook panel on the same context (for
  * cell widgets and the open command's `currentWidget`); `IDocumentManager` opens notebooks as
  * DAGs; `IRenderMimeRegistry`, `IEditorServices` (its mime type service) and
@@ -65,7 +80,11 @@ import type { IDagRunOptions } from './executor';
  * `ITranslator` the translation bundle.
  *
  * Tracking and restoring. The factory emits `widgetCreated` for every DAG view; the tracker
- * records it, and `tracker.save` on `pathChanged` keeps a renamed notebook restorable. The layout
+ * records it, and `tracker.save` on `pathChanged` keeps a renamed notebook restorable. The same
+ * hook re-evaluates `addCell` once the context is ready: a restored view builds its toolbar before
+ * the file has loaded, and `CommandToolbarButton` only re-reads `isEnabled` on
+ * `commandChanged`, which the application fires on tab switches, so without the notification the
+ * button would stay greyed out until the user changed tabs. The layout
  * restorer (`ILayoutRestorer.restore`, `@jupyterlab/application/src/layoutrestorer.ts:234`) saves
  * every tracked widget under `namespace:name` (`layoutrestorer.ts:253-256`) and, on the next
  * start, re-runs `command` with `args(widget)` for each: `docmanager:open` with `factory: 'DAG'`
@@ -75,7 +94,16 @@ import type { IDagRunOptions } from './executor';
  * reveals an existing DAG view for the path or opens one; the options (`IOpenOptions`,
  * `@jupyterlab/docregistry/src/registry.ts:1121`) place it split to the right of the notebook.
  * The three run commands share one table and read `args.cellId`, which the node toolbar passes
- * and the document toolbar does not. The toolbar buttons grey out on `isEnabled`.
+ * and the document toolbar does not. `addCell` forwards to `DagPanel.addCell`, with
+ * `args.cellType` when it names a cell type; `interruptKernel` calls the kernel connection's
+ * `interrupt` (`@jupyterlab/services/src/kernel/kernel.ts:205`); `restartKernel` goes through
+ * `ISessionContextDialogs.restart` (`@jupyterlab/apputils/src/sessioncontext.tsx:337`), which
+ * confirms first unless the `skipKernelRestartDialog` setting is on and starts the previous
+ * kernel again when none is running. The toolbar buttons grey out on `isEnabled`. Those three
+ * commands take core's `args.toolbar` convention: the schema passes it for the toolbar items,
+ * which belong to a document, while from the palette the DAG view has to be the shell's current
+ * widget, since the tracker's current widget outlives its focus. Interrupt and restart are not
+ * in the palette, where core's notebook entries already reach the same kernel.
  *
  * Translation. `translator.load('jupyter-dag')` (`ITranslator.load`,
  * `@jupyterlab/rendermime-interfaces/src/index.ts:757`) selects this extension's own domain;
@@ -115,6 +143,17 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
     const translator = translator_ ?? nullTranslator;
     const trans = translator.load('jupyter-dag');
     const tracker = new WidgetTracker<DagDocument>({ namespace: TRACKER_NAMESPACE });
+    toolbarRegistry.addFactory<DagDocument>(
+      FACTORY_NAME,
+      'cellType',
+      doc => new CellTypeSelect(doc.content, translator)
+    );
+    toolbarRegistry.addFactory<DagDocument>(FACTORY_NAME, 'kernelName', doc =>
+      Toolbar.createKernelNameItem(doc.context.sessionContext, sessionDialogs ?? undefined, translator)
+    );
+    toolbarRegistry.addFactory<DagDocument>(FACTORY_NAME, 'executionProgress', doc =>
+      createExecutionIndicator(doc, notebookTracker, settingRegistry, translator)
+    );
     const toolbarFactory = createToolbarFactory(toolbarRegistry, settingRegistry, FACTORY_NAME, PLUGIN_ID, translator);
     const settings = await settingRegistry.load(PLUGIN_ID);
 
@@ -137,6 +176,8 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
     factory.widgetCreated.connect((_, widget) => {
       void tracker.add(widget);
       widget.context.pathChanged.connect(() => void tracker.save(widget));
+      // The toolbar is built before the file has loaded; re-evaluate `isEnabled` once it has.
+      void widget.context.ready.then(() => commands.notifyCommandChanged(CommandIDs.addCell));
     });
     app.docRegistry.addWidgetFactory(factory);
     if (restorer) {
@@ -185,9 +226,46 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
       isEnabled: () => !!tracker.currentWidget,
       execute: () => tracker.currentWidget?.content.autoLayout()
     });
+    // Toolbar buttons act on their own document; from the palette the DAG view has to be the current widget.
+    const isActive = (args: ReadonlyPartialJSONObject): boolean =>
+      !!tracker.currentWidget && (args.toolbar === true || tracker.currentWidget === app.shell.currentWidget);
+    commands.addCommand(CommandIDs.addCell, {
+      label: trans.__('Add Cell'),
+      caption: trans.__('Add a cell after the selected cell, or at the end of the notebook'),
+      icon: addIcon,
+      isEnabled: args => isActive(args) && !!tracker.currentWidget?.context.isReady,
+      execute: (args: ReadonlyPartialJSONObject) => {
+        tracker.currentWidget?.content.addCell(isDagCellType(args.cellType) ? args.cellType : undefined);
+      }
+    });
+    commands.addCommand(CommandIDs.interruptKernel, {
+      label: trans.__('Interrupt Kernel'),
+      caption: trans.__('Interrupt the kernel'),
+      icon: stopIcon,
+      isEnabled: isActive,
+      execute: () => tracker.currentWidget?.context.sessionContext.session?.kernel?.interrupt()
+    });
+    const dialogs = sessionDialogs ?? new SessionContextDialogs({ translator });
+    commands.addCommand(CommandIDs.restartKernel, {
+      label: trans.__('Restart Kernel…'),
+      caption: trans.__('Restart the kernel'),
+      icon: refreshIcon,
+      isEnabled: isActive,
+      execute: async () => {
+        const sessionContext = tracker.currentWidget?.context.sessionContext;
+        if (!sessionContext) {
+          return;
+        }
+        try {
+          await dialogs.restart(sessionContext); // starts the previous kernel again when none is running, as core does
+        } catch (reason) {
+          console.warn('jupyter-dag: kernel restart failed', reason); // "No kernel to restart" when none ever ran
+        }
+      }
+    });
     if (palette) {
       const category = trans.__('Notebook Operations');
-      [CommandIDs.open, CommandIDs.runAll, CommandIDs.autoLayout].forEach(command =>
+      [CommandIDs.open, CommandIDs.runAll, CommandIDs.autoLayout, CommandIDs.addCell].forEach(command =>
         palette.addItem({ command, category })
       );
     }
@@ -211,8 +289,33 @@ export const dagGraphModelPlugin: JupyterFrontEndPlugin<IDagGraphModelFactory> =
   provides: IDagGraphModelFactory,
   activate: (): IDagGraphModelFactory => notebook => new DagGraphModel(notebook)
 };
+
+/**
+ * Shows the current DAG view's kernel in the status bar.
+ *
+ * @remarks
+ * The status-bar kernel item (core's `apputils-extension` `kernel-status` plugin) asks every
+ * registered session provider for the current widget's session context and shows the first
+ * answer as "kernel | status"; a click opens the kernel picker. The notebook extension's provider
+ * answers only for notebook panels, so DAG tabs showed nothing. This provider answers for tracked
+ * DAG views with the shared session context. `IKernelStatusModel`
+ * (`@jupyterlab/apputils/src/tokens.ts:55-73`) is optional because the status bar can be
+ * disabled.
+ */
+export const dagKernelStatusPlugin: JupyterFrontEndPlugin<void> = {
+  id: `${PLUGIN_ID_BASE}:kernel-status`,
+  description: 'Shows the kernel of the current DAG view in the status bar.',
+  autoStart: true,
+  requires: [IDagTracker],
+  optional: [IKernelStatusModel],
+  activate: (_app: JupyterFrontEnd, tracker: IDagTracker, kernelStatus: IKernelStatusModel | null): void => {
+    kernelStatus?.addSessionProvider(
+      widget => (widget && tracker.find(doc => doc === widget)?.context.sessionContext) ?? null
+    );
+  }
+};
 /**
  * The package's default export: every plugin JupyterLab activates for this extension, so a new
  * plugin has to be added here.
  */
-export const dagPlugins: JupyterFrontEndPlugin<unknown>[] = [dagViewPlugin, dagGraphModelPlugin];
+export const dagPlugins: JupyterFrontEndPlugin<unknown>[] = [dagViewPlugin, dagGraphModelPlugin, dagKernelStatusPlugin];

@@ -17,16 +17,18 @@ import type { ISessionContext } from '@jupyterlab/apputils';
 import { LabIcon, ReactWidget } from '@jupyterlab/ui-components';
 import type { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import type { IEditorMimeTypeService } from '@jupyterlab/codeeditor';
+import { CodeCell, isCodeCellModel } from '@jupyterlab/cells';
 import type { Cell } from '@jupyterlab/cells';
 import { nullTranslator } from '@jupyterlab/translation';
 import type { ITranslator } from '@jupyterlab/translation';
 import { Signal } from '@lumino/signaling';
 import { DagCanvas } from './canvas';
 import type { ICellNodeContext } from './cellnode';
-import { DagGraphModel } from './wiring';
+import { DagGraphModel, downstreamOf, removeAllWires } from './wiring';
+import { clearOutputs, deleteCell } from './cells';
 import { DagExecutor } from './executor';
 import { DagKernelClient } from './protocol';
-import type { IDagDocument, IDagSettings } from './tokens';
+import type { DagCellType, IDagDocument, IDagSettings } from './tokens';
 
 /** The tab icon of a DAG view: three nodes and two wires, in JupyterLab's icon style. */
 export const dagIcon = new LabIcon({
@@ -57,6 +59,7 @@ export class DagPanel extends ReactWidget {
     this.settings = options.settings;
     this._mimeTypeService = options.mimeTypeService;
     this._notebookTracker = options.notebookTracker;
+    const trans = (options.translator ?? nullTranslator).load('jupyter-dag');
     this.graph = new DagGraphModel(options.context.model);
     this.client = new DagKernelClient(this.context.sessionContext, this.settings.analyzeChannel);
     this.executor = new DagExecutor({
@@ -72,6 +75,7 @@ export class DagPanel extends ReactWidget {
       contentFactory: options.contentFactory,
       rendermime: options.rendermime,
       translator: options.translator ?? nullTranslator,
+      trans,
       graph: this.graph,
       outputOnly: this.settings.outputOnlyNodes,
       registerWidget: (id, cell) => {
@@ -81,7 +85,29 @@ export class DagPanel extends ReactWidget {
           this._widgets.delete(id);
         }
       },
-      onRunDownstream: id => void this.executor.run({ mode: 'downstream', roots: [id] })
+      onRunDownstream: id => void this.executor.run({ mode: 'downstream', roots: [id] }),
+      onRemoveCell: id => {
+        if (!this.isDisposed) {
+          const downstream = downstreamOf([id], this.graph.wires, false); // before the wires go with the cell
+          if (deleteCell(this.graph.notebook, id)) {
+            this.graph.markStale(downstream);
+          }
+        }
+      },
+      onRemoveEdges: id => {
+        if (!this.isDisposed) {
+          removeAllWires(this.graph, id);
+        }
+      },
+      onClearOutput: id => {
+        const cell = this.graph.findCell(id);
+        if (this.isDisposed || !cell || !isCodeCellModel(cell)) {
+          return;
+        }
+        const widget = this.cellWidget(id);
+        clearOutputs(cell, widget instanceof CodeCell ? widget : undefined);
+        this.graph.markStale([id]);
+      }
     };
     this.client.featuresChanged.connect(this._analyze, this);
     this.context.sessionContext.kernelChanged.connect(this._updateMimeTypes, this);
@@ -99,9 +125,24 @@ export class DagPanel extends ReactWidget {
   readonly client: DagKernelClient;
   /** The executor the toolbar and node buttons run cells through. */
   readonly executor: DagExecutor;
+  /** The type the next {@link DagPanel.addCell} inserts; the toolbar dropdown writes it. */
+  newCellType: DagCellType = 'code';
   /** Re-run auto-layout on the canvas (toolbar button / command). */
   autoLayout(): void {
     this._layoutRequested.emit();
+  }
+  /**
+   * Ask the canvas to add a cell after the selected cell, or at the end of the notebook.
+   *
+   * @param type - The cell type; the dropdown's choice by default.
+   *
+   * @remarks
+   * A request signal rather than a model write, because where the cell goes (after which cell,
+   * at which canvas position) depends on the selection and the viewport, which only the canvas
+   * knows; `DagCanvas` inserts the cell and selects its node.
+   */
+  addCell(type: DagCellType = this.newCellType): void {
+    this._addCellRequested.emit(type);
   }
   /**
    * The live cell widget to execute a cell in: this view's, or the notebook panel's on the same context.
@@ -150,6 +191,7 @@ export class DagPanel extends ReactWidget {
         nodeContext={this._nodeContext}
         settings={this.settings}
         layoutRequested={this._layoutRequested}
+        addCellRequested={this._addCellRequested}
       />
     );
   }
@@ -194,6 +236,7 @@ export class DagPanel extends ReactWidget {
   private _notebookTracker: INotebookTracker;
   private _widgets = new Map<string, Cell>();
   private _layoutRequested = new Signal<this, void>(this);
+  private _addCellRequested = new Signal<this, DagCellType>(this);
 }
 /** Namespace for {@link DagPanel} statics. */
 export namespace DagPanel {

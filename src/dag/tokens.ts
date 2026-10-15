@@ -36,6 +36,11 @@ export const FACTORY_NAME = 'DAG';
 export const METADATA_KEY = 'jupyter-dag';
 /** The `WidgetTracker` namespace; also the prefix of the ids the layout restorer saves. */
 export const TRACKER_NAMESPACE = 'jupyter-dag';
+/**
+ * The id of core's notebook tracker plugin, whose `kernelStatus` settings hold the execution
+ * indicator's display options; the DAG toolbar's indicator reads them too.
+ */
+export const NOTEBOOK_TRACKER_PLUGIN_ID = '@jupyterlab/notebook-extension:tracker';
 
 /** Command ids registered by the view plugin; the schema's toolbar and menu entries refer to them. */
 export namespace CommandIDs {
@@ -49,12 +54,29 @@ export namespace CommandIDs {
   export const runUpstream = 'jupyter-dag:run-upstream';
   /** Re-run the automatic layout of the current DAG view. */
   export const autoLayout = 'jupyter-dag:auto-layout';
+  /** Add a cell after the selected cell, of the type picked in the toolbar dropdown unless `args.cellType` says otherwise. */
+  export const addCell = 'jupyter-dag:add-cell';
+  /** Interrupt the kernel of the current DAG view's session. */
+  export const interruptKernel = 'jupyter-dag:interrupt-kernel';
+  /** Restart that kernel, after the usual confirmation dialog. */
+  export const restartKernel = 'jupyter-dag:restart-kernel';
 }
 
 /** Layout direction: top-to-bottom or left-to-right, as dagre spells `rankdir`. */
 export type LayoutDirection = 'TB' | 'LR';
 /** The kernel channel `analyze_request` is sent on. */
 export type AnalyzeChannel = 'shell' | 'control';
+/** The cell types the toolbar dropdown offers: nbformat's three. */
+export type DagCellType = 'code' | 'markdown' | 'raw';
+/**
+ * Whether `value` is a {@link DagCellType}.
+ *
+ * @param value - A command argument or a `<select>` value.
+ * @returns True for `'code'`, `'markdown'` and `'raw'`.
+ */
+export function isDagCellType(value: unknown): value is DagCellType {
+  return value === 'code' || value === 'markdown' || value === 'raw';
+}
 
 /** User settings declared in `schema/plugin.json` under {@link PLUGIN_ID}; the schema supplies the defaults. */
 export interface IDagSettings {

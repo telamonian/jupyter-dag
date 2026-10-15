@@ -124,6 +124,10 @@ export function collectWires(model: INotebookModel): IWire[] {
  * @param target - The downstream cell id.
  * @returns The new wire, or `null` when nothing was written. Adding a wire that already exists
  * writes an unchanged `inputs` list, which the metadata setter drops, and still returns the wire.
+ *
+ * @remarks
+ * The write is its own undoable transaction (a nested call inside a caller's transaction joins
+ * that one), so a wire drawn on the canvas is one undo step like every other edit there.
  */
 export function addWire(graph: DagGraphModel, source: string, target: string): IWire | null {
   const cell = graph.findCell(target);
@@ -131,11 +135,13 @@ export function addWire(graph: DagGraphModel, source: string, target: string): I
     return null;
   }
   const { inputs } = getCellMetadata(cell);
-  updateCellMetadata(cell, { inputs: [...new Set([...inputs, source])] });
+  graph.notebook.sharedModel.transact(() => {
+    updateCellMetadata(cell, { inputs: [...new Set([...inputs, source])] });
+  }, true);
   return { id: wireId(source, target), source, target };
 }
 /**
- * Remove a wire; a no-op if the target does not exist or has no such input.
+ * Remove a wire, as one undo step; a no-op if the target does not exist or has no such input.
  *
  * @param graph - The graph model, for the cell lookup.
  * @param source - The upstream cell id.
@@ -144,8 +150,37 @@ export function addWire(graph: DagGraphModel, source: string, target: string): I
 export function removeWire(graph: DagGraphModel, source: string, target: string): void {
   const cell = graph.findCell(target);
   if (cell) {
-    updateCellMetadata(cell, { inputs: getCellMetadata(cell).inputs.filter(id => id !== source) });
+    graph.notebook.sharedModel.transact(() => {
+      updateCellMetadata(cell, { inputs: getCellMetadata(cell).inputs.filter(id => id !== source) });
+    }, true);
   }
+}
+/**
+ * Remove every wire into and out of a cell, as one undo step; a no-op if the cell does not exist.
+ *
+ * @param graph - The graph model, for the cell lookup and the current wires.
+ * @param cellId - The cell whose wires go.
+ *
+ * @remarks
+ * Inbound wires live on this cell's own `inputs`; outbound ones on each target's. The outbound
+ * list is read before the transaction because {@link DagGraphModel.wires} is a cache that is only
+ * dropped after the transaction commits, while the reads inside it (`getCellMetadata` in
+ * {@link removeWire}) see the writes at once. The former targets are marked stale: they lost an
+ * input they last ran with.
+ */
+export function removeAllWires(graph: DagGraphModel, cellId: string): void {
+  const cell = graph.findCell(cellId);
+  if (!cell) {
+    return;
+  }
+  const outbound = graph.wires.filter(w => w.source === cellId);
+  graph.notebook.sharedModel.transact(() => {
+    updateCellMetadata(cell, { inputs: [] });
+    for (const w of outbound) {
+      removeWire(graph, w.source, w.target);
+    }
+  }, true);
+  graph.markStale(outbound.map(w => w.target));
 }
 
 /**
@@ -347,6 +382,9 @@ export class DagGraphModel implements IDagGraphModel, IDisposable {
    * @param s - The new state.
    */
   setState(cellId: string, s: DagNodeState): void {
+    if (!this.findCell(cellId)) {
+      return; // a cell deleted while it was running: nothing to show, and no entry to leave behind
+    }
     this._state.set(cellId, s);
     this._changed.emit({ type: 'state', cellIds: [cellId] });
   }
