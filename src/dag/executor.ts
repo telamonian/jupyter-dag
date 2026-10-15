@@ -5,7 +5,8 @@
  * (`@jupyterlab/notebook/src/tokens.ts:192`), the same object the notebook toolbar's Run button
  * uses, so kernel selection, markdown rendering, execution counts and error dialogs behave as
  * they do in the notebook. What this module adds is the order (from {@link topologicalOrder}), the
- * optional purge before each code cell, and the bookkeeping of node states.
+ * optional purge (unbinding what a cell defined last time) before each code cell, and the
+ * bookkeeping of node states.
  *
  * @module
  */
@@ -34,16 +35,13 @@ export interface IDagRunOptions {
  * Runs cells in wire order through the core cell executor, so each run has the toolbar's semantics.
  *
  * @remarks
- * What `runCell` does for us. `runCell` (`@jupyterlab/notebook/src/cellexecutor.ts:25`) renders a
- * markdown cell and reports it executed (`cellexecutor.ts:37-41`), starts a kernel when the
- * session has none and asks the user to pick one if `sessionDialogs` is given
- * (`cellexecutor.ts:66-70`), runs a code cell with `CodeCell.execute`
+ * What `runCell` does. `runCell` (`@jupyterlab/notebook/src/cellexecutor.ts:25`) drives a live
+ * `Cell` widget, not a model: it renders a markdown cell and reports it executed
+ * (`cellexecutor.ts:37-41`), starts a kernel when the session has none (see
+ * `IOptions.sessionDialogs`), runs a code cell with `CodeCell.execute`
  * (`@jupyterlab/cells/src/widget.ts:1744`), and on a kernel error calls `onCellExecuted` with
  * `success: false` and then rethrows the `KernelError`
- * (`@jupyterlab/notebook/src/cellexecutor.ts:116-125`). That last
- * point is why the catch in `_runOne` only returns `false`: the state was already recorded by the
- * callback. `sessionDialogs` and `translator` are optional in its options
- * (`@jupyterlab/notebook/src/tokens.ts:181`, `:185`), so they are passed through as given.
+ * (`@jupyterlab/notebook/src/cellexecutor.ts:116-125`).
  *
  * Why the notebook panel's signals are also watched. `NotebookActions` emits `executed`,
  * `executionScheduled`, `selectionExecuted` and `outputCleared`
@@ -55,8 +53,8 @@ export interface IDagRunOptions {
  *
  * Why cells run one at a time. `Private.runCells` sends every `execute_request` at once
  * (`actions.tsx:2900-2901`) and lets the kernel's `stop_on_error` abort the rest. Here each cell is
- * awaited before the next is sent, because the purge for a cell has to precede that cell's
- * execute request on the shell channel and the kernel processes shell messages in order, and
+ * awaited before the next is sent, because the purge for a cell has to be sent before that cell's
+ * `execute_request` (`IDagTransport.namespaceDelete` in `protocol.ts` has the ordering rule), and
  * because stopping at the first failure needs the result before deciding.
  */
 export class DagExecutor implements IDisposable {
@@ -84,10 +82,8 @@ export class DagExecutor implements IDisposable {
    * @returns True when every cell ran successfully.
    *
    * @remarks
-   * The cell set is chosen first ({@link downstreamOf} or {@link upstreamOf} of the roots, or every
-   * cell), then ordered with {@link topologicalOrder}, which ignores wires leaving the set. The
-   * session's `ready` promise is awaited so a run started before the kernel connected waits for
-   * it instead of failing. `remaining` holds the cells still to run so that marking dependents
+   * The session's `ready` promise is awaited so a run started before the kernel connected waits
+   * for it instead of failing. `remaining` holds the cells still to run so that marking dependents
    * stale after each cell skips the ones this same run is about to execute.
    */
   async run({ mode, roots = [] }: IDagRunOptions): Promise<boolean> {
@@ -114,9 +110,7 @@ export class DagExecutor implements IDisposable {
    * @returns The results keyed by cell id; empty when the kernel offers no analysis.
    *
    * @remarks
-   * Sends the whole notebook's source in one `analyze_request`; the DAG panel calls this whenever
-   * the kernel client's features change (kernel start, change or restart). The results are kept
-   * only for `_purge`, which needs the names a cell defined the last time it was analysed.
+   * Sends the whole notebook's source in one `analyze_request`.
    */
   async analyzeAll(): Promise<Map<string, IAnalyzedCell>> {
     const cells = Array.from(this._graph.notebook.cells, cell => ({
@@ -132,19 +126,19 @@ export class DagExecutor implements IDisposable {
   }
 
   /**
-   * Run one cell: purge, then `runCell`, then record the outcome.
+   * Run one cell: purge on kernels that support it, then `runCell`, then record the outcome.
    *
    * @param cellId - The cell to run.
    * @param remaining - The cells this run will still execute afterwards; they are not marked stale.
    * @returns True when the cell ran successfully.
    *
    * @remarks
-   * `runCell` needs a live `Cell` widget, not a model, because it drives the widget (prompt,
-   * outputs, rendering). `widgetFor` supplies the DAG view's own widget, or the notebook panel's
-   * widget for the same cell when the DAG node shows outputs only; with neither, the cell is marked
-   * `error` and the run stops. `notebook` in the options is the notebook *model*, despite the name
-   * (`@jupyterlab/notebook/src/tokens.ts:157`), and `notebookConfig` takes the defaults
-   * (`StaticNotebook.defaultNotebookConfig`, `@jupyterlab/notebook/src/widget.ts:1462`).
+   * The purge is sent only for a code cell and only when the kernel advertises
+   * {@link FEATURE_NAMESPACE_DELETE}. `notebook` in the options is the notebook *model*, despite
+   * the name (`@jupyterlab/notebook/src/tokens.ts:157`), and `notebookConfig` takes the defaults
+   * (`StaticNotebook.defaultNotebookConfig`, `@jupyterlab/notebook/src/widget.ts:1462`). A
+   * `KernelError` from `runCell` is caught and reported as `false`: the failure was already
+   * recorded through the `onCellExecuted` callback before the rethrow.
    */
   private async _runOne(cellId: string, remaining: ReadonlySet<string>): Promise<boolean> {
     const cell = this._widgetFor(cellId);
@@ -186,11 +180,9 @@ export class DagExecutor implements IDisposable {
    * @param cellId - The cell about to run.
    *
    * @remarks
-   * The names come from the last {@link DagExecutor.analyzeAll}; a cell that was never analysed or
-   * whose analysis failed is not purged. The `namespace_delete` request is not awaited: it goes out
-   * on the shell channel before the cell's `execute_request`, and the kernel handles shell messages
-   * in order, so the purge has happened by the time the cell runs. Only kernels advertising
-   * {@link FEATURE_NAMESPACE_DELETE} get one.
+   * The names are the `defined` list of the last {@link DagExecutor.analyzeAll}; the other lists
+   * are not used yet. The request is not awaited: `IDagTransport.namespaceDelete` in `protocol.ts`
+   * states the shell ordering that makes that safe, and the comm case where it is not.
    */
   private _purge(cellId: string): void {
     const analyzed = this._lastAnalysis.get(cellId);
@@ -274,9 +266,18 @@ export namespace DagExecutor {
      * @param cellId - The cell id.
      */
     widgetFor: (cellId: string) => Cell | undefined;
-    /** Dialogs for kernel selection; without them `runCell` starts a kernel silently or not at all. */
+    /**
+     * Dialogs for kernel selection. When the session has no kernel, `runCell` calls
+     * `sessionContext.startKernel()` and opens the picker only when these are given
+     * (`@jupyterlab/notebook/src/cellexecutor.ts:66-70`); without them a session still without a
+     * kernel leaves the cell unexecuted and returns `true` (`:73-78`), and the DAG run carries on
+     * to the next cell. Optional for `runCell` too (`@jupyterlab/notebook/src/tokens.ts:181`).
+     */
     sessionDialogs?: ISessionContext.IDialogs;
-    /** The application translator, for `runCell`'s dialogs. */
+    /**
+     * The application translator, for `runCell`'s dialogs; optional there too
+     * (`@jupyterlab/notebook/src/tokens.ts:185`).
+     */
     translator?: ITranslator;
   }
 }

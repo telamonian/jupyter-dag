@@ -85,10 +85,10 @@ function wireToEdge(wire: IWire): Edge {
  * @returns A `cellNode` with no data; the node reads everything from the graph model.
  *
  * @remarks
- * `deletable: false` is what stops React Flow from deleting nodes on Backspace: cells are deleted
- * in the notebook, never from the canvas, and the cell list drives `'nodes'` changes. React Flow's
- * `getElementsToRemove` skips non-deletable nodes and therefore also their connected edges, so
- * only explicitly selected edges are ever deleted from here.
+ * `deletable: false` stops React Flow from deleting nodes on Backspace: cells are deleted only in
+ * the notebook, and the cell list drives `'nodes'` changes. React Flow's `getElementsToRemove`
+ * skips non-deletable nodes and therefore also their connected edges, so only explicitly selected
+ * edges are deleted from here.
  *
  * @see https://reactflow.dev/api-reference/types/node
  */
@@ -118,18 +118,18 @@ export interface IDagCanvasProps {
 }
 
 /**
- * The flow itself; must live inside a `ReactFlowProvider` because it uses the React Flow hooks.
+ * The flow: everything rendered inside the `ReactFlowProvider`.
  *
  * @param props - See {@link IDagCanvasProps}.
  * @returns The `ReactFlow` element with its background and controls.
  *
  * @remarks
- * State kept here. `nodes` and `edges` are React state seeded from the model; `direction` is the
- * layout direction (from the notebook's metadata, else the settings); `defaultViewport` is read
- * once because React Flow only applies that prop at mount. `useNodesInitialized` reports when
- * every node has been measured in the DOM, and `useStore` exposes the container size; both gate
- * the first automatic layout, because `fitView` on a container of zero size (a tab that is not
- * yet shown) produces `NaN` positions.
+ * `defaultViewport` is read once into state because React Flow only applies that prop at mount.
+ * `useNodesInitialized` reports when every node has been measured in the DOM, and `useStore`
+ * exposes the container size; both gate the first automatic layout, because `fitView` on a
+ * container of zero size (a tab that is not yet shown) produces `NaN` positions. That first
+ * layout runs only when the notebook has no stored viewport, so a notebook laid out once opens as
+ * the user left it.
  *
  * How model changes reach the canvas. `refresh` runs on every graph change. For `'nodes'` it
  * rebuilds the node array from the cell list but keeps the existing node object for every cell
@@ -139,22 +139,21 @@ export interface IDagCanvasProps {
  *
  * How gestures reach the model. A finished drag or resize is a `'position'` change with
  * `dragging: false` or a `'dimensions'` change with `resizing: false`; those are persisted to cell
- * metadata, batched in one `sharedModel.transact` (`@jupyter/ydoc/src/ydocument.ts:231-233`,
- * where the `undoable` flag makes the transaction one undo step). Connecting two ports calls
- * {@link addWire}; deleting a selected edge or reconnecting one calls {@link removeWire}; the model
- * then announces the change and `refresh` rebuilds the edges. Only `applyEdgeChanges` is still
- * applied locally, for selection changes. Auto-layout reads the current nodes and edges from the
- * React Flow instance (`getNodes`, `getEdges`) rather than from React state, so the callback does
- * not have to change identity every time a node moves.
+ * metadata in one `sharedModel.transact`, so a multi-node drag is one undo step (the transaction
+ * rule is on `updateCellMetadata` in `wiring.ts`). Connecting two ports calls {@link addWire};
+ * deleting a selected edge or reconnecting one calls {@link removeWire}; the model then announces
+ * the change and `refresh` rebuilds the edges. Every change list is also applied locally, with
+ * `applyNodeChanges` and `applyEdgeChanges`, since drags in progress and selection exist only in
+ * React state; a removal is applied locally and then confirmed by `refresh`. Auto-layout reads the
+ * current nodes and edges from the React Flow instance (`getNodes`, `getEdges`) rather than from
+ * React state, so the callback does not have to change identity every time a node moves.
  *
- * Why `isValidConnection` matters for performance. React Flow calls it on every pointer move while
- * a connection is being dragged, and it runs a cycle check over the wires, which is why
- * {@link DagGraphModel.wires} is cached. `ConnectionMode.Strict` means a connection must go from a
- * source handle to a target handle, so wires cannot be drawn backwards.
- *
- * On reconnect, the old wire is removed before the new one is added: `removeWire` writes the
- * metadata synchronously, which invalidates the wire cache, so the cycle check inside `addWire`
- * sees the graph without the old wire.
+ * `isValidConnection` runs the cycle check on every pointer move while a connection is dragged,
+ * against the cached {@link DagGraphModel.wires}. On reconnect the old wire is removed before the
+ * new one is added, so the cycle check inside {@link addWire} sees the graph without it; the graph
+ * model answers for the document as it stands at the call (`IDagGraphModel` in `tokens.ts`).
+ * `ConnectionMode.Strict` means a connection must go from a source handle to a target handle, so
+ * wires cannot be drawn backwards.
  *
  * @see https://reactflow.dev/api-reference/hooks/use-react-flow
  * @see https://reactflow.dev/api-reference/hooks/use-nodes-initialized
@@ -323,9 +322,8 @@ function DagFlow({ graph, settings, layoutRequested }: IDagCanvasProps): JSX.Ele
  * @returns The canvas element.
  *
  * @remarks
- * `ReactFlowProvider` holds the React Flow store; the hooks `DagFlow` uses (`useReactFlow`,
- * `useStore`, `useNodesInitialized`, `useOnSelectionChange`) need to be rendered inside it, which
- * is why the flow is a separate component.
+ * `ReactFlowProvider` holds the React Flow store, and React Flow's hooks read it from context, so
+ * the flow, which calls them, is a separate component rendered inside the provider.
  *
  * @see https://reactflow.dev/api-reference/react-flow-provider
  */

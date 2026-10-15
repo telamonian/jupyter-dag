@@ -1,11 +1,8 @@
 /**
  * The JupyterLab plugins: the DAG document view, and the graph-model factory other plugins can require.
  *
- * A JupyterLab plugin is an object with an `id`, the tokens it `requires` and takes as `optional`,
- * the token it `provides`, and an `activate` function; the application resolves the tokens from
- * the plugins that provide them and calls `activate(app, ...required, ...optional)` with the
- * optional ones as `null` when absent. Everything the DAG view needs from core arrives that way,
- * and everything it offers to others (the tracker, the graph-model factory) leaves that way.
+ * `activate` receives the `requires` tokens in order, then the `optional` ones, with `null` for any
+ * that no plugin provides.
  *
  * @module
  */
@@ -44,30 +41,28 @@ import type { IDagRunOptions } from './executor';
  * The DAG view plugin: registers the widget factory, tracks open views, and adds the commands.
  *
  * @remarks
- * Why it has the template's plugin id. `schema/plugin.json` is bound to {@link PLUGIN_ID}: its
- * `jupyter.lab.toolbars` block defines the notebook and DAG toolbars, `jupyter.lab.menus` the View
- * menu entry, and its properties are the settings, all attached to whichever plugin has this id.
- *
- * What each token is for. `INotebookTracker` finds the notebook panel on the same context (for
- * cell widgets and the open command's `currentWidget`); `IDocumentManager` opens notebooks as
- * DAGs; `IRenderMimeRegistry`, `IEditorServices` (its mime type service) and
- * `NotebookPanel.IContentFactory` are what building cell widgets needs; `INotebookCellExecutor`
- * runs cells; `ISettingRegistry` loads the settings. `IToolbarWidgetRegistry` is required rather
- * than optional because of the ordering below. Optional: `ILayoutRestorer` reopens DAG views on
- * reload, `ICommandPalette` lists the commands, `ISessionContextDialogs` provides the kernel
- * picker, `ITranslator` the translation bundle.
- *
  * Why the toolbar factory is created before the settings load. The schema declares
  * `jupyter.lab.transform: true`, which tells the settings registry that a plugin will transform
  * the schema before it can be used; `SettingRegistry.load`
  * (`@jupyterlab/settingregistry/src/settingregistry.ts:370`) therefore fails for this plugin until
  * a transformer is registered (`settingregistry.ts:726`, "has no transformers yet").
- * `createToolbarFactory` (`@jupyterlab/apputils/src/toolbar/factory.ts:252`) is what registers it:
+ * `createToolbarFactory` (`@jupyterlab/apputils/src/toolbar/factory.ts:252`) registers it:
  * through `setToolbarItems` (`factory.ts:65`) it installs a transformer that merges the schema's
  * toolbar definitions into the `toolbar` property (`factory.ts:123`) and then loads the settings
  * itself (`factory.ts:184`). Once that has run, `settingRegistry.load` resolves and its
- * `composite` carries the schema defaults; the factory reads them at each widget creation so a
- * settings change applies to the next DAG view.
+ * `composite` carries the schema defaults.
+ *
+ * Why it has the template's plugin id. {@link PLUGIN_ID} is the id `schema/plugin.json` is bound
+ * to; that schema holds the notebook and DAG toolbars, the View menu entry and the settings.
+ *
+ * What each token is for. `INotebookTracker` finds the notebook panel on the same context (for
+ * cell widgets and the open command's `currentWidget`); `IDocumentManager` opens notebooks as
+ * DAGs; `IRenderMimeRegistry`, `IEditorServices` (its mime type service) and
+ * `NotebookPanel.IContentFactory` build cell widgets; `INotebookCellExecutor` runs cells;
+ * `ISettingRegistry` loads the settings. `IToolbarWidgetRegistry` is required rather than optional
+ * because of the ordering above. Optional: `ILayoutRestorer` reopens DAG views on reload,
+ * `ICommandPalette` lists the commands, `ISessionContextDialogs` provides the kernel picker,
+ * `ITranslator` the translation bundle.
  *
  * Tracking and restoring. The factory emits `widgetCreated` for every DAG view; the tracker
  * records it, and `tracker.save` on `pathChanged` keeps a renamed notebook restorable. The layout
@@ -80,7 +75,7 @@ import type { IDagRunOptions } from './executor';
  * reveals an existing DAG view for the path or opens one; the options (`IOpenOptions`,
  * `@jupyterlab/docregistry/src/registry.ts:1121`) place it split to the right of the notebook.
  * The three run commands share one table and read `args.cellId`, which the node toolbar passes
- * and the document toolbar does not. `isEnabled` is what the toolbar buttons grey out on.
+ * and the document toolbar does not. The toolbar buttons grey out on `isEnabled`.
  *
  * Translation. `translator.load('jupyter-dag')` (`ITranslator.load`,
  * `@jupyterlab/rendermime-interfaces/src/index.ts:757`) selects this extension's own domain;
@@ -216,5 +211,8 @@ export const dagGraphModelPlugin: JupyterFrontEndPlugin<IDagGraphModelFactory> =
   provides: IDagGraphModelFactory,
   activate: (): IDagGraphModelFactory => notebook => new DagGraphModel(notebook)
 };
-/** All plugins of the extension, in the order they are listed; the package's default export. */
+/**
+ * The package's default export: every plugin JupyterLab activates for this extension, so a new
+ * plugin has to be added here.
+ */
 export const dagPlugins: JupyterFrontEndPlugin<unknown>[] = [dagViewPlugin, dagGraphModelPlugin];
