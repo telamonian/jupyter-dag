@@ -211,10 +211,11 @@ export class DagExecutor implements IDisposable {
    * @remarks
    * The reactive reading of the notebook, done once on demand: code cells whose source changed
    * since their analysis are analysed in one request, then {@link inferWires} joins each cell's
-   * referenced names to the nearest earlier cell defining them, and {@link replaceWires} writes
-   * the result as one undo step. Cells that did not parse take part with no names, so they lose
-   * their wires. Cells whose inputs changed are marked stale, as they are when a wire is removed
-   * by hand: what counts as upstream of them just changed.
+   * referenced names to the nearest cell above it defining them, wrapping round to the bottom of
+   * the notebook when nothing above does, and {@link replaceWires} writes the result as one undo
+   * step. Cells that did not parse take part with no names, so they lose their wires. Cells whose
+   * inputs changed are marked stale, as they are when a wire is removed by hand: what counts as
+   * upstream of them just changed.
    */
   async autoWire(): Promise<number> {
     if (!this._client.features.has(FEATURE_ANALYZE)) {

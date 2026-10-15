@@ -29,15 +29,31 @@ describe('wiring', () => {
 });
 
 describe('inferWires', () => {
-  it('wires each reader to the nearest earlier definer, forward only', () => {
+  it('wires each reader to the nearest definer above it', () => {
     const wires = inferWires([
       { id: 'a', defined: ['x'], referenced: [] },
       { id: 'b', defined: ['y'], referenced: ['x', 'print'] },
       { id: 'c', defined: [], referenced: ['x', 'y'] },
-      { id: 'd', defined: ['x'], referenced: ['z'] },
-      { id: 'e', defined: ['z'], referenced: ['x'] }
+      { id: 'd', defined: ['x'], referenced: [] },
+      { id: 'e', defined: [], referenced: ['x'] }
     ]);
     expect(wires.map(w => w.id)).toEqual(['a->b', 'a->c', 'b->c', 'd->e']);
+  });
+  it('wraps round to the last definer below a reader that has none above', () => {
+    const wires = inferWires([
+      { id: 'a', defined: [], referenced: ['w'] },
+      { id: 'b', defined: ['w'], referenced: [] },
+      { id: 'c', defined: ['w'], referenced: [] },
+      { id: 'd', defined: ['x'], referenced: ['w'] }
+    ]);
+    expect(wires.map(w => w.id)).toEqual(['c->d', 'c->a']);
+  });
+  it('leaves out a wrapped wire that would close a cycle with the forward ones', () => {
+    const wires = inferWires([
+      { id: 'a', defined: ['x'], referenced: ['y'] },
+      { id: 'b', defined: ['y'], referenced: ['x'] }
+    ]);
+    expect(wires.map(w => w.id)).toEqual(['a->b']);
   });
   it('makes one wire per pair even when several names are shared', () => {
     const wires = inferWires([

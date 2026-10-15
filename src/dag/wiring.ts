@@ -194,33 +194,66 @@ export interface ICellNames {
 }
 
 /**
- * The wires names imply: each cell depends on the nearest earlier cell that defines a name it references.
+ * The wires names imply: each cell depends on the nearest cell above it that defines a name it
+ * references, searching up from the reader and wrapping round from the top of the notebook to
+ * the bottom.
  *
  * @param cells - Code cells in document order, with their analysed names.
- * @returns The wires, in document order of their targets, one per source and target pair.
+ * @returns The wires: the forward ones in document order of their targets, then the wrapped ones.
  *
  * @remarks
- * This is the dependency a reactive notebook infers, read the notebook's own way: one pass down
- * the document, so a name several cells define resolves to the closest definition above its
- * reader, and every wire points forward, which makes the result a DAG by construction. A name
- * defined only below its reader gets no wire, and neither do builtins, which no cell defines.
+ * This is the dependency a reactive notebook infers, read the notebook's own way: a name several
+ * cells define resolves to the closest definition above its reader, as a top-to-bottom run would
+ * leave it. A name with no definition above its reader is taken from the closest definition
+ * climbing up from the end of the notebook, so a cell that uses what a later cell sets up still
+ * gets its wire. The forward wires are placed first; a wrapped wire that would close a cycle with
+ * them (two cells each reading what the other defines) is left out, since the graph has to stay
+ * a DAG and the forward reading is the one the notebook's order already implies. Builtins get no
+ * wire, since no cell defines them.
  */
 export function inferWires(cells: readonly ICellNames[]): IWire[] {
-  const lastDefiner = new Map<string, string>();
-  const wires: IWire[] = [];
-  for (const cell of cells) {
-    const sources = new Set<string>();
-    for (const name of cell.referenced) {
-      const source = lastDefiner.get(name);
-      if (source !== undefined) {
-        sources.add(source);
+  const definers = new Map<string, number[]>();
+  cells.forEach((cell, index) => {
+    for (const name of cell.defined) {
+      const indices = definers.get(name);
+      if (indices) {
+        indices.push(index);
+      } else {
+        definers.set(name, [index]);
       }
     }
-    for (const source of sources) {
-      wires.push({ id: wireId(source, cell.id), source, target: cell.id });
+  });
+  const wires: IWire[] = [];
+  const wrapped: IWire[] = [];
+  cells.forEach((cell, index) => {
+    const above = new Set<number>();
+    const below = new Set<number>();
+    for (const name of cell.referenced) {
+      let nearestAbove = -1;
+      let lastBelow = -1;
+      for (const definer of definers.get(name) ?? []) {
+        if (definer < index) {
+          nearestAbove = definer;
+        } else if (definer > index) {
+          lastBelow = definer;
+        }
+      }
+      if (nearestAbove >= 0) {
+        above.add(nearestAbove);
+      } else if (lastBelow >= 0) {
+        below.add(lastBelow);
+      }
     }
-    for (const name of cell.defined) {
-      lastDefiner.set(name, cell.id);
+    for (const source of above) {
+      wires.push({ id: wireId(cells[source].id, cell.id), source: cells[source].id, target: cell.id });
+    }
+    for (const source of below) {
+      wrapped.push({ id: wireId(cells[source].id, cell.id), source: cells[source].id, target: cell.id });
+    }
+  });
+  for (const wire of wrapped) {
+    if (!wires.some(w => w.id === wire.id) && !wouldCreateCycle(wires, wire.source, wire.target)) {
+      wires.push(wire);
     }
   }
   return wires;
