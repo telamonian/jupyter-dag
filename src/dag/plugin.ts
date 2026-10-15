@@ -27,6 +27,7 @@ import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 import { addIcon, refreshIcon, runIcon, stopIcon } from '@jupyterlab/ui-components';
 import type { ReadonlyPartialJSONObject } from '@lumino/coreutils';
 import { DagDocument, DagWidgetFactory, dagIcon } from './document';
+import { FEATURE_ANALYZE } from './protocol';
 import { CellTypeSelect, createExecutionIndicator } from './toolbar';
 import { DagGraphModel } from './wiring';
 import {
@@ -94,7 +95,9 @@ import type { IDagRunOptions } from './executor';
  * reveals an existing DAG view for the path or opens one; the options (`IOpenOptions`,
  * `@jupyterlab/docregistry/src/registry.ts:1121`) place it split to the right of the notebook.
  * The three run commands share one table and read `args.cellId`, which the node toolbar passes
- * and the document toolbar does not. `addCell` forwards to `DagPanel.addCell`, with
+ * and the document toolbar does not. `autoWire` runs `DagExecutor.autoWire`, enabled only once
+ * the kernel client has found the analysis feature, which is why `widgetCreated` re-evaluates it
+ * on `featuresChanged`. `addCell` forwards to `DagPanel.addCell`, with
  * `args.cellType` when it names a cell type; `interruptKernel` calls the kernel connection's
  * `interrupt` (`@jupyterlab/services/src/kernel/kernel.ts:205`); `restartKernel` goes through
  * `ISessionContextDialogs.restart` (`@jupyterlab/apputils/src/sessioncontext.tsx:337`), which
@@ -183,6 +186,8 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
       widget.context.pathChanged.connect(() => void tracker.save(widget));
       // The toolbar is built before the file has loaded; re-evaluate `isEnabled` once it has.
       void widget.context.ready.then(() => commands.notifyCommandChanged(CommandIDs.addCell));
+      // Auto-wire needs the kernel's analysis, which is only known once features are detected.
+      widget.content.client.featuresChanged.connect(() => commands.notifyCommandChanged(CommandIDs.autoWire));
     });
     app.docRegistry.addWidgetFactory(factory);
     if (restorer) {
@@ -227,7 +232,8 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
       });
     }
     commands.addCommand(CommandIDs.autoLayout, {
-      label: trans.__('Auto-layout DAG'),
+      label: trans.__('Auto-layout'),
+      caption: trans.__('Lay the nodes out from the wires'),
       isEnabled: () => !!tracker.currentWidget,
       execute: () => tracker.currentWidget?.content.autoLayout()
     });
@@ -268,6 +274,12 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
         }
       }
     });
+    commands.addCommand(CommandIDs.autoWire, {
+      label: trans.__('Auto-wire'),
+      caption: trans.__('Replace every wire with the dependencies the kernel finds between cells'),
+      isEnabled: args => isActive(args) && !!tracker.currentWidget?.content.client.features.has(FEATURE_ANALYZE),
+      execute: () => tracker.currentWidget?.content.executor.autoWire()
+    });
     commands.addCommand(CommandIDs.undo, {
       label: trans.__('Undo DAG Edit'),
       caption: trans.__('Undo the last change to the notebook'),
@@ -285,6 +297,7 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
       [
         CommandIDs.open,
         CommandIDs.runAll,
+        CommandIDs.autoWire,
         CommandIDs.autoLayout,
         CommandIDs.addCell,
         CommandIDs.undo,

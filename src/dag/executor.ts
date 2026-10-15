@@ -6,7 +6,7 @@
  * uses, so kernel selection, markdown rendering, execution counts and error dialogs behave as
  * they do in the notebook. What this module adds is the order (from {@link topologicalOrder}), the
  * optional purge (unbinding what a cell's last run bound) before each code cell and when a cell is
- * deleted, and the bookkeeping of node states.
+ * deleted, the bookkeeping of node states, and auto-wiring from the kernel's analysis.
  *
  * @module
  */
@@ -19,9 +19,9 @@ import type { Kernel, Session } from '@jupyterlab/services';
 import type { ITranslator } from '@jupyterlab/translation';
 import { Signal } from '@lumino/signaling';
 import type { IDisposable } from '@lumino/disposable';
-import { downstreamOf, topologicalOrder, upstreamOf } from './wiring';
-import type { DagGraphModel } from './wiring';
-import { FEATURE_NAMESPACE_DELETE } from './protocol';
+import { downstreamOf, inferWires, replaceWires, topologicalOrder, upstreamOf } from './wiring';
+import type { DagGraphModel, ICellNames } from './wiring';
+import { FEATURE_ANALYZE, FEATURE_NAMESPACE_DELETE } from './protocol';
 import type { DagKernelClient, IAnalyzeCellInput, IAnalyzedCell } from './protocol';
 
 /** A cell's analysis together with the source it was computed from, so a changed source is re-analysed. */
@@ -201,6 +201,37 @@ export class DagExecutor implements IDisposable {
     if (names.length && this._client.features.has(FEATURE_NAMESPACE_DELETE)) {
       await this._client.namespaceDelete(names);
     }
+  }
+
+  /**
+   * Replace every wire with the dependencies one round of the kernel's analysis finds.
+   *
+   * @returns The number of wires set; nothing is touched when the kernel offers no analysis.
+   *
+   * @remarks
+   * The reactive reading of the notebook, done once on demand: code cells whose source changed
+   * since their analysis are analysed in one request, then {@link inferWires} joins each cell's
+   * referenced names to the nearest earlier cell defining them, and {@link replaceWires} writes
+   * the result as one undo step. Cells that did not parse take part with no names, so they lose
+   * their wires. Cells whose inputs changed are marked stale, as they are when a wire is removed
+   * by hand: what counts as upstream of them just changed.
+   */
+  async autoWire(): Promise<number> {
+    if (!this._client.features.has(FEATURE_ANALYZE)) {
+      return 0;
+    }
+    const ids = this._graph.cellIds;
+    await this._analyzeChanged(ids);
+    const cells: ICellNames[] = [];
+    for (const id of ids) {
+      const analysed = this._analysis.get(id)?.result;
+      if (analysed && analysed.status !== 'error') {
+        cells.push({ id, defined: analysed.defined, referenced: analysed.referenced });
+      }
+    }
+    const wires = inferWires(cells);
+    this._graph.markStale(replaceWires(this._graph, wires));
+    return wires.length;
   }
 
   /**

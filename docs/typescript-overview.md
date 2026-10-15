@@ -47,7 +47,7 @@ the shell channel and a failure stops the run. On kernels that advertise the fea
 unbinds what the cell's last run bound before it re-runs, and `forgetCell` does the same when a
 cell is deleted from the DAG view, marking its dependents stale; the executor keeps each cell's
 analysis together with the source it came from, re-analyses changed cells in one request before a
-run and after a notebook-panel run, and drops its run records on a restart. It also watches `NotebookActions`' signals so a cell run from
+run and after a notebook-panel run, and drops its run records on a restart. `autoWire` is the reactive reading done once on demand: it analyses every code cell and replaces all wires with one from each referenced name to the nearest earlier cell that defines it. It also watches `NotebookActions`' signals so a cell run from
 the notebook panel marks its dependents stale too, and the session's signals so a kernel restart
 or swap marks every node stale.
 

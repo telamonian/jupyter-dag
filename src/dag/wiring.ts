@@ -183,6 +183,84 @@ export function removeAllWires(graph: DagGraphModel, cellId: string): void {
   graph.markStale(outbound.map(w => w.target));
 }
 
+/** What {@link inferWires} needs to know about a cell: the names its source defines and references. */
+export interface ICellNames {
+  /** The cell id. */
+  id: string;
+  /** Global names the cell binds. */
+  defined: readonly string[];
+  /** Global names the cell reads without binding them. */
+  referenced: readonly string[];
+}
+
+/**
+ * The wires names imply: each cell depends on the nearest earlier cell that defines a name it references.
+ *
+ * @param cells - Code cells in document order, with their analysed names.
+ * @returns The wires, in document order of their targets, one per source and target pair.
+ *
+ * @remarks
+ * This is the dependency a reactive notebook infers, read the notebook's own way: one pass down
+ * the document, so a name several cells define resolves to the closest definition above its
+ * reader, and every wire points forward, which makes the result a DAG by construction. A name
+ * defined only below its reader gets no wire, and neither do builtins, which no cell defines.
+ */
+export function inferWires(cells: readonly ICellNames[]): IWire[] {
+  const lastDefiner = new Map<string, string>();
+  const wires: IWire[] = [];
+  for (const cell of cells) {
+    const sources = new Set<string>();
+    for (const name of cell.referenced) {
+      const source = lastDefiner.get(name);
+      if (source !== undefined) {
+        sources.add(source);
+      }
+    }
+    for (const source of sources) {
+      wires.push({ id: wireId(source, cell.id), source, target: cell.id });
+    }
+    for (const name of cell.defined) {
+      lastDefiner.set(name, cell.id);
+    }
+  }
+  return wires;
+}
+
+/**
+ * Replace every wire in the notebook with `wires`, as one undo step.
+ *
+ * @param graph - The graph model.
+ * @param wires - The wires to keep; every other wire goes.
+ * @returns The ids of the cells whose inputs changed, in document order.
+ *
+ * @remarks
+ * Each cell's `inputs` is rewritten only when its set of sources changes, so a cell whose wires
+ * are confirmed is not touched and not reported.
+ */
+export function replaceWires(graph: DagGraphModel, wires: readonly IWire[]): string[] {
+  const inputs = new Map<string, string[]>();
+  for (const w of wires) {
+    const sources = inputs.get(w.target);
+    if (sources) {
+      sources.push(w.source);
+    } else {
+      inputs.set(w.target, [w.source]);
+    }
+  }
+  const changed: string[] = [];
+  graph.notebook.sharedModel.transact(() => {
+    for (const cell of graph.notebook.cells) {
+      const next = inputs.get(cell.id) ?? [];
+      const current = getCellMetadata(cell).inputs;
+      if (!ArrayExt.shallowEqual([...current].sort(), [...next].sort())) {
+        updateCellMetadata(cell, { inputs: next });
+        changed.push(cell.id);
+      }
+    }
+  }, true);
+  return changed;
+}
+
 /**
  * Adjacency list: source id to target ids.
  *

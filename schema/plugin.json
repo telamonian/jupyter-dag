@@ -55,9 +55,17 @@
         }
       },
       {
+        "name": "autoWire",
+        "command": "jupyter-dag:auto-wire",
+        "args": {
+          "toolbar": true
+        },
+        "rank": 20
+      },
+      {
         "name": "autoLayout",
         "command": "jupyter-dag:auto-layout",
-        "rank": 20
+        "rank": 21
       },
       {
         "name": "spacer",

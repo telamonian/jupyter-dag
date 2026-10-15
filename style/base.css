@@ -116,3 +116,8 @@
   background: var(--jp-layout-color1);
   border: 1px solid var(--jp-border-color2);
 }
+
+/* The auto-wire and auto-layout pair form their own toolbar group, a tab's breadth after the kernel buttons. */
+.jp-DagDocument .jp-Toolbar-item[data-jp-item-name='autoWire'] {
+  margin-left: 32px;
+}

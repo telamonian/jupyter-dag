@@ -54,6 +54,8 @@ export namespace CommandIDs {
   export const runUpstream = 'jupyter-dag:run-upstream';
   /** Re-run the automatic layout of the current DAG view. */
   export const autoLayout = 'jupyter-dag:auto-layout';
+  /** Replace every wire with the dependencies one round of the kernel's analysis finds. */
+  export const autoWire = 'jupyter-dag:auto-wire';
   /** Add a cell after the selected cell, of the type picked in the toolbar dropdown unless `args.cellType` says otherwise. */
   export const addCell = 'jupyter-dag:add-cell';
   /** Interrupt the kernel of the current DAG view's session. */

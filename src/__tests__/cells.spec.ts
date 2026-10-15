@@ -8,7 +8,7 @@ import { NotebookModel } from '@jupyterlab/notebook';
 import type { YNotebook } from '@jupyter/ydoc';
 import type { ICodeCellModel } from '@jupyterlab/cells';
 import { clearOutputs, deleteCell, insertCell, insertIndexAfter } from '../dag/cells';
-import { DagGraphModel, addWire, collectWires, removeAllWires } from '../dag/wiring';
+import { DagGraphModel, addWire, collectWires, removeAllWires, replaceWires } from '../dag/wiring';
 import { METADATA_KEY } from '../dag/tokens';
 
 describe('insertIndexAfter', () => {
@@ -103,6 +103,23 @@ describe('cell operations on the notebook model', () => {
     expect(graph.stateOf(c)).toBe('stale');
     model.sharedModel.undo();
     expect(graph.wires.map(w => w.id)).toEqual([`${a}->${b}`, `${b}->${c}`]);
+    graph.dispose();
+  });
+
+  it('replaces every wire as one undo step and reports the cells whose inputs changed', () => {
+    const model = makeNotebook(['a', 'b', 'c']);
+    const graph = new DagGraphModel(model);
+    const [a, b, c] = graph.cellIds;
+    addWire(graph, a, b);
+    settle(model);
+    const changed = replaceWires(graph, [
+      { id: `${a}->${c}`, source: a, target: c },
+      { id: `${b}->${c}`, source: b, target: c }
+    ]);
+    expect(changed).toEqual([b, c]);
+    expect(graph.wires.map(w => w.id)).toEqual([`${a}->${c}`, `${b}->${c}`]);
+    model.sharedModel.undo();
+    expect(graph.wires.map(w => w.id)).toEqual([`${a}->${b}`]);
     graph.dispose();
   });
 
