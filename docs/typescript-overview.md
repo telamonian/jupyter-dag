@@ -43,9 +43,11 @@ list between changes, and keeps the ephemeral per-node state (`fresh`, `stale`, 
 notebook toolbar uses, so kernel selection, markdown rendering, execution counts and error dialogs
 behave as in the notebook. It chooses the cell set (all, downstream of roots, upstream of roots),
 orders it, and runs one cell at a time so that each cell's purge precedes its `execute_request` on
-the shell channel and a failure stops the run. `analyzeAll` sends the whole notebook in one
-request and keeps the results; the purge unbinds a cell's `defined` names before it re-runs, on
-kernels that advertise the feature. It also watches `NotebookActions`' signals so a cell run from
+the shell channel and a failure stops the run. On kernels that advertise the feature, the purge
+unbinds what the cell's last run bound before it re-runs, and `forgetCell` does the same when a
+cell is deleted from the DAG view, marking its dependents stale; the executor keeps each cell's
+analysis together with the source it came from, re-analyses changed cells in one request before a
+run and after a notebook-panel run, and drops its run records on a restart. It also watches `NotebookActions`' signals so a cell run from
 the notebook panel marks its dependents stale too, and the session's signals so a kernel restart
 or swap marks every node stale.
 

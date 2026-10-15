@@ -25,7 +25,7 @@ import type { Message } from '@lumino/messaging';
 import { Signal } from '@lumino/signaling';
 import { DagCanvas } from './canvas';
 import type { ICellNodeContext } from './cellnode';
-import { DagGraphModel, downstreamOf, removeAllWires } from './wiring';
+import { DagGraphModel, removeAllWires } from './wiring';
 import { clearOutputs, deleteCell } from './cells';
 import { DagExecutor } from './executor';
 import { DagKernelClient } from './protocol';
@@ -89,12 +89,14 @@ export class DagPanel extends ReactWidget {
       },
       onRunDownstream: id => void this.executor.run({ mode: 'downstream', roots: [id] }),
       onRemoveCell: id => {
-        if (!this.isDisposed) {
-          const downstream = downstreamOf([id], this.graph.wires, false); // before the wires go with the cell
-          if (deleteCell(this.graph.notebook, id)) {
-            this.graph.markStale(downstream);
-          }
+        const cell = this.graph.findCell(id);
+        if (this.isDisposed || !cell || cell.getMetadata('deletable') === false) {
+          return;
         }
+        this.executor
+          .forgetCell(id) // unbinds its names and marks its dependents stale, while the wires still exist
+          .catch(reason => console.warn('jupyter-dag: unbinding a deleted cell failed', reason));
+        deleteCell(this.graph.notebook, id);
       },
       onRemoveEdges: id => {
         if (!this.isDisposed) {
