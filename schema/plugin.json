@@ -1,6 +1,17 @@
 {
   "jupyter.lab.transform": true,
-  "jupyter.lab.shortcuts": [],
+  "jupyter.lab.shortcuts": [
+    {
+      "command": "jupyter-dag:undo",
+      "keys": ["Z"],
+      "selector": ".jp-DagPanel:focus-within:not(:has(.cm-focused)):not(:has(input:focus)):not(:has(textarea:focus)):not(:has(select:focus))"
+    },
+    {
+      "command": "jupyter-dag:redo",
+      "keys": ["Shift Z"],
+      "selector": ".jp-DagPanel:focus-within:not(:has(.cm-focused)):not(:has(input:focus)):not(:has(textarea:focus)):not(:has(select:focus))"
+    }
+  ],
   "jupyter.lab.toolbars": {
     "Notebook": [
       {
@@ -11,14 +22,63 @@
     ],
     "DAG": [
       {
+        "name": "cellType",
+        "rank": 1
+      },
+      {
+        "name": "addCell",
+        "command": "jupyter-dag:add-cell",
+        "rank": 2,
+        "args": {
+          "toolbar": true
+        }
+      },
+      {
         "name": "runDag",
         "command": "jupyter-dag:run-all",
         "rank": 10
       },
       {
+        "name": "interrupt",
+        "command": "jupyter-dag:interrupt-kernel",
+        "rank": 11,
+        "args": {
+          "toolbar": true
+        }
+      },
+      {
+        "name": "restart",
+        "command": "jupyter-dag:restart-kernel",
+        "rank": 12,
+        "args": {
+          "toolbar": true
+        }
+      },
+      {
+        "name": "autoWire",
+        "command": "jupyter-dag:auto-wire",
+        "args": {
+          "toolbar": true
+        },
+        "rank": 20
+      },
+      {
         "name": "autoLayout",
         "command": "jupyter-dag:auto-layout",
-        "rank": 20
+        "rank": 21
+      },
+      {
+        "name": "spacer",
+        "type": "spacer",
+        "rank": 100
+      },
+      {
+        "name": "kernelName",
+        "rank": 1000
+      },
+      {
+        "name": "executionProgress",
+        "rank": 1002
       }
     ]
   },

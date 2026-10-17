@@ -17,16 +17,19 @@ import type { ISessionContext } from '@jupyterlab/apputils';
 import { LabIcon, ReactWidget } from '@jupyterlab/ui-components';
 import type { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import type { IEditorMimeTypeService } from '@jupyterlab/codeeditor';
+import { CodeCell, isCodeCellModel } from '@jupyterlab/cells';
 import type { Cell } from '@jupyterlab/cells';
 import { nullTranslator } from '@jupyterlab/translation';
 import type { ITranslator } from '@jupyterlab/translation';
+import type { Message } from '@lumino/messaging';
 import { Signal } from '@lumino/signaling';
 import { DagCanvas } from './canvas';
 import type { ICellNodeContext } from './cellnode';
-import { DagGraphModel } from './wiring';
+import { DagGraphModel, removeAllWires } from './wiring';
+import { clearOutputs, deleteCell } from './cells';
 import { DagExecutor } from './executor';
 import { DagKernelClient } from './protocol';
-import type { IDagDocument, IDagSettings } from './tokens';
+import type { DagCellType, IDagDocument, IDagSettings } from './tokens';
 
 /** The tab icon of a DAG view: three nodes and two wires, in JupyterLab's icon style. */
 export const dagIcon = new LabIcon({
@@ -53,10 +56,12 @@ export class DagPanel extends ReactWidget {
   constructor(options: DagPanel.IOptions) {
     super();
     this.addClass('jp-DagPanel');
+    this.node.tabIndex = -1; // focusable, so the view's keyboard shortcuts have somewhere to land
     this.context = options.context;
     this.settings = options.settings;
     this._mimeTypeService = options.mimeTypeService;
     this._notebookTracker = options.notebookTracker;
+    const trans = (options.translator ?? nullTranslator).load('jupyter-dag');
     this.graph = new DagGraphModel(options.context.model);
     this.client = new DagKernelClient(this.context.sessionContext, this.settings.analyzeChannel);
     this.executor = new DagExecutor({
@@ -72,6 +77,7 @@ export class DagPanel extends ReactWidget {
       contentFactory: options.contentFactory,
       rendermime: options.rendermime,
       translator: options.translator ?? nullTranslator,
+      trans,
       graph: this.graph,
       outputOnly: this.settings.outputOnlyNodes,
       registerWidget: (id, cell) => {
@@ -81,7 +87,31 @@ export class DagPanel extends ReactWidget {
           this._widgets.delete(id);
         }
       },
-      onRunDownstream: id => void this.executor.run({ mode: 'downstream', roots: [id] })
+      onRunDownstream: id => void this.executor.run({ mode: 'downstream', roots: [id] }),
+      onRemoveCell: id => {
+        const cell = this.graph.findCell(id);
+        if (this.isDisposed || !cell || cell.getMetadata('deletable') === false) {
+          return;
+        }
+        this.executor
+          .forgetCell(id) // unbinds its names and marks its dependents stale, while the wires still exist
+          .catch(reason => console.warn('jupyter-dag: unbinding a deleted cell failed', reason));
+        deleteCell(this.graph.notebook, id);
+      },
+      onRemoveEdges: id => {
+        if (!this.isDisposed) {
+          removeAllWires(this.graph, id);
+        }
+      },
+      onClearOutput: id => {
+        const cell = this.graph.findCell(id);
+        if (this.isDisposed || !cell || !isCodeCellModel(cell)) {
+          return;
+        }
+        const widget = this.cellWidget(id);
+        clearOutputs(cell, widget instanceof CodeCell ? widget : undefined);
+        this.graph.markStale([id]);
+      }
     };
     this.client.featuresChanged.connect(this._analyze, this);
     this.context.sessionContext.kernelChanged.connect(this._updateMimeTypes, this);
@@ -99,9 +129,24 @@ export class DagPanel extends ReactWidget {
   readonly client: DagKernelClient;
   /** The executor the toolbar and node buttons run cells through. */
   readonly executor: DagExecutor;
+  /** The type the next {@link DagPanel.addCell} inserts; the toolbar dropdown writes it. */
+  newCellType: DagCellType = 'code';
   /** Re-run auto-layout on the canvas (toolbar button / command). */
   autoLayout(): void {
     this._layoutRequested.emit();
+  }
+  /**
+   * Ask the canvas to add a cell after the selected cell, or at the end of the notebook.
+   *
+   * @param type - The cell type; the dropdown's choice by default.
+   *
+   * @remarks
+   * A request signal rather than a model write, because where the cell goes (after which cell,
+   * at which canvas position) depends on the selection and the viewport, which only the canvas
+   * knows; `DagCanvas` inserts the cell and selects its node.
+   */
+  addCell(type: DagCellType = this.newCellType): void {
+    this._addCellRequested.emit(type);
   }
   /**
    * The live cell widget to execute a cell in: this view's, or the notebook panel's on the same context.
@@ -122,6 +167,22 @@ export class DagPanel extends ReactWidget {
     }
     const panel = this._notebookTracker.find(p => p.context === this.context);
     return panel?.content.widgets.find(c => c.model.id === cellId);
+  }
+  /**
+   * Focus the panel's node, so the DAG view's keyboard shortcuts apply.
+   *
+   * @param msg - The activate request.
+   *
+   * @remarks
+   * `MainAreaWidget` forwards its own activation to its content
+   * (`@jupyterlab/apputils/src/mainareawidget.ts:175-177`, `:268-279`), so this runs when the document becomes
+   * the current widget. With `tabIndex` -1 on the node, a click on anything unfocusable inside the
+   * canvas also lands focus on the panel (the browser focuses the closest focusable ancestor), and
+   * the `Z` and `Shift Z` bindings in `schema/plugin.json`, whose selector is a `DagPanel` with
+   * focus inside it and no focused editor or input, hold after any click on the canvas.
+   */
+  protected onActivateRequest(msg: Message): void {
+    this.node.focus();
   }
   /**
    * Render the canvas, or nothing until the notebook model has loaded.
@@ -150,6 +211,7 @@ export class DagPanel extends ReactWidget {
         nodeContext={this._nodeContext}
         settings={this.settings}
         layoutRequested={this._layoutRequested}
+        addCellRequested={this._addCellRequested}
       />
     );
   }
@@ -194,6 +256,7 @@ export class DagPanel extends ReactWidget {
   private _notebookTracker: INotebookTracker;
   private _widgets = new Map<string, Cell>();
   private _layoutRequested = new Signal<this, void>(this);
+  private _addCellRequested = new Signal<this, DagCellType>(this);
 }
 /** Namespace for {@link DagPanel} statics. */
 export namespace DagPanel {

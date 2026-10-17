@@ -11,14 +11,15 @@
 import { graphlib, layout } from '@dagrejs/dagre';
 import type { NodeLabel } from '@dagrejs/dagre';
 import { Position } from '@xyflow/react';
-import type { Edge, Node, XYPosition } from '@xyflow/react';
+import type { Dimensions, Edge, Node, Rect, Transform, XYPosition } from '@xyflow/react';
 import type { LayoutDirection } from './tokens';
 
 const NODESEP = 24;
-const RANKSEP = 48;
+/** The gap between ranks, in pixels; also the gap under a selected node where a new cell's node goes. */
+export const RANKSEP = 48;
 const EDGESEP = 12;
-/** Size assumed for nodes React Flow has not measured yet. */
-const FALLBACK = { width: 360, height: 140 };
+/** The size assumed for a node React Flow has not measured yet, and the size a new node is centred with. */
+export const DEFAULT_NODE_SIZE: Dimensions = { width: 360, height: 140 };
 
 /**
  * Compute a position for every node and return copies of the nodes with the positions applied.
@@ -59,8 +60,8 @@ export function layoutElements<N extends Node, E extends Edge>(
   g.setGraph({ rankdir: direction, nodesep: NODESEP, ranksep: RANKSEP, edgesep: EDGESEP });
   const connected = new Set<string>(edges.flatMap(e => [e.source, e.target]));
   const sizeOf = (n: N) => ({
-    width: n.measured?.width ?? n.width ?? FALLBACK.width,
-    height: n.measured?.height ?? n.height ?? FALLBACK.height
+    width: n.measured?.width ?? n.width ?? DEFAULT_NODE_SIZE.width,
+    height: n.measured?.height ?? n.height ?? DEFAULT_NODE_SIZE.height
   });
   for (const n of nodes) {
     if (connected.has(n.id)) {
@@ -89,4 +90,76 @@ export function layoutElements<N extends Node, E extends Edge>(
     const position: XYPosition = { x: (nl.x ?? 0) - (nl.width ?? 0) / 2, y: (nl.y ?? 0) - (nl.height ?? 0) / 2 }; // dagre returns centers
     return { ...n, position, sourcePosition, targetPosition };
   });
+}
+
+/**
+ * The top-left corner that centres a node of `size` in the visible part of the canvas.
+ *
+ * @param width - The canvas width in screen pixels.
+ * @param height - The canvas height in screen pixels.
+ * @param transform - The viewport as React Flow's store keeps it: `[x, y, zoom]`.
+ * @param size - The node size to centre.
+ * @returns The position in flow coordinates.
+ *
+ * @remarks
+ * The screen-to-flow conversion is `(screen - pan) / zoom`, what React Flow's
+ * `pointToRendererPoint` does for `screenToFlowPosition`; that helper takes client coordinates
+ * and reads the DOM, whereas the store's `width`, `height` and `transform` are already at hand.
+ *
+ * @see https://reactflow.dev/api-reference/hooks/use-store
+ */
+export function viewportCentre(width: number, height: number, transform: Transform, size: Dimensions): XYPosition {
+  const [tx, ty, zoom] = transform;
+  return { x: (width / 2 - tx) / zoom - size.width / 2, y: (height / 2 - ty) / zoom - size.height / 2 };
+}
+
+/**
+ * The position one rank below a rectangle, left-aligned with it.
+ *
+ * @param rect - The bounds of the selected nodes, in flow coordinates.
+ * @param gap - The vertical gap; {@link RANKSEP} by default, so the node sits where auto-layout would put a new rank.
+ * @returns The top-left corner for a node placed under `rect`.
+ */
+export function positionBelow(rect: Rect, gap = RANKSEP): XYPosition {
+  return { x: rect.x, y: rect.y + rect.height + gap };
+}
+
+/** The two endpoints of an edge, as React Flow passes them to an edge component. */
+export interface IEdgeEndpoints {
+  /** Where the edge leaves the source node. */
+  sourceX: number;
+  /** Where the edge leaves the source node. */
+  sourceY: number;
+  /** Where the edge enters the target node. */
+  targetX: number;
+  /** Where the edge enters the target node. */
+  targetY: number;
+}
+
+/** Where the remove button of a selected edge is anchored. */
+export interface IEdgeButtonAnchor {
+  /** The anchor's horizontal flow coordinate. */
+  x: number;
+  /** The anchor's vertical flow coordinate. */
+  y: number;
+  /** Which side of the anchor the button hangs on: below the top end of a downward edge, above it when the edge runs upward. */
+  alignY: 'top' | 'bottom';
+}
+
+/**
+ * The anchor for an edge's remove button: the endpoint with the smaller `y`.
+ *
+ * @param edge - The edge's endpoints.
+ * @returns The upper endpoint and the side the button goes on.
+ *
+ * @remarks
+ * Handles are fixed at the top (target) and bottom (source) of every node, so in a top-to-bottom
+ * layout the upper end is the source and the button hangs below it, clear of the node. In a
+ * left-to-right layout an edge can run upward; its upper end is then the arrowhead on the target,
+ * and the button goes above it instead of over the target node.
+ */
+export function edgeButtonAnchor(edge: IEdgeEndpoints): IEdgeButtonAnchor {
+  return edge.sourceY <= edge.targetY
+    ? { x: edge.sourceX, y: edge.sourceY, alignY: 'top' }
+    : { x: edge.targetX, y: edge.targetY, alignY: 'bottom' };
 }

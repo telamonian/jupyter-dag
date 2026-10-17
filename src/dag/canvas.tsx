@@ -29,7 +29,8 @@ import {
   useNodesInitialized,
   useOnSelectionChange,
   useReactFlow,
-  useStore
+  useStore,
+  useStoreApi
 } from '@xyflow/react';
 import type {
   Connection,
@@ -50,7 +51,9 @@ import type { ICellModel } from '@jupyterlab/cells';
 import type { ISignal } from '@lumino/signaling';
 import { CellNodeContext, nodeTypes, useLuminoSignal } from './cellnode';
 import type { CellNode, ICellNodeContext } from './cellnode';
-import { layoutElements } from './layout';
+import { insertCell, insertIndexAfter } from './cells';
+import { DEFAULT_NODE_SIZE, layoutElements, positionBelow, viewportCentre } from './layout';
+import { edgeTypes } from './wireedge';
 import {
   addWire,
   getCellMetadata,
@@ -61,18 +64,22 @@ import {
   wouldCreateCycle
 } from './wiring';
 import type { DagGraphModel } from './wiring';
-import type { IDagCellMetadata, IDagGraphChange, IDagSettings, IWire, LayoutDirection } from './tokens';
+import type { DagCellType, IDagCellMetadata, IDagGraphChange, IDagSettings, IWire, LayoutDirection } from './tokens';
 
-// React Flow's default edge is the bezier we want; the class styles it (style/base.css).
-const defaultEdgeOptions: DefaultEdgeOptions = { className: 'jp-DagWire', markerEnd: { type: MarkerType.ArrowClosed } };
+// Every type-less edge becomes a `wire` (wireedge.tsx); the class styles it (style/base.css).
+const defaultEdgeOptions: DefaultEdgeOptions = {
+  type: 'wire',
+  className: 'jp-DagWire',
+  markerEnd: { type: MarkerType.ArrowClosed }
+};
 const fitViewOptions: FitViewOptions<CellNode> = { padding: 0.2 };
 
 /**
  * The React Flow edge for a wire: the built-in bezier edge, identified by the wire id.
  *
  * @param wire - The wire.
- * @returns An edge with no `type`, so React Flow renders its default edge with
- * `defaultEdgeOptions` (the `jp-DagWire` class and an arrow head) merged in.
+ * @returns An edge with no `type`, so `defaultEdgeOptions` (the `wire` type, the `jp-DagWire`
+ * class and an arrow head) is merged in at render.
  */
 function wireToEdge(wire: IWire): Edge {
   return { id: wire.id, source: wire.source, target: wire.target };
@@ -115,6 +122,8 @@ export interface IDagCanvasProps {
   settings: IDagSettings;
   /** Emitted by the document (toolbar / command) to run auto-layout. */
   layoutRequested: ISignal<unknown, void>;
+  /** Emitted by the document (toolbar / command) to add a cell of the given type. */
+  addCellRequested: ISignal<unknown, DagCellType>;
 }
 
 /**
@@ -141,8 +150,9 @@ export interface IDagCanvasProps {
  * `dragging: false` or a `'dimensions'` change with `resizing: false`; those are persisted to cell
  * metadata in one `sharedModel.transact`, so a multi-node drag is one undo step (the transaction
  * rule is on `updateCellMetadata` in `wiring.ts`). Connecting two ports calls {@link addWire};
- * deleting a selected edge or reconnecting one calls {@link removeWire}; the model then announces
- * the change and `refresh` rebuilds the edges. Every change list is also applied locally, with
+ * deleting a selected edge (Backspace or its own button, `wireedge.tsx`) or reconnecting one calls
+ * {@link removeWire}; the model then announces the change and `refresh` rebuilds the edges. Every
+ * change list is also applied locally, with
  * `applyNodeChanges` and `applyEdgeChanges`, since drags in progress and selection exist only in
  * React state; a removal is applied locally and then confirmed by `refresh`. Auto-layout reads the
  * current nodes and edges from the React Flow instance (`getNodes`, `getEdges`) rather than from
@@ -155,11 +165,21 @@ export interface IDagCanvasProps {
  * `ConnectionMode.Strict` means a connection must go from a source handle to a target handle, so
  * wires cannot be drawn backwards.
  *
+ * How a cell is added. `addCellRequested` carries the cell type; the handler reads the selection
+ * from the React Flow instance, inserts the cell after the last selected cell (or at the end)
+ * with its node under the selection's bounds (`getNodesBounds`) or at the viewport centre, then
+ * selects the new node. The graph's `'nodes'` refresh runs synchronously inside `insertCell` (Yjs
+ * observers fire at the end of the transaction), so the selection updater queues behind the one
+ * that adds the node; both keep every other node object's identity. The store's
+ * `nodesSelectionActive` is cleared too: after a box selection React Flow keeps its selection
+ * rectangle while any node is selected, and the rectangle would land on the new node and swallow
+ * clicks on its editor.
+ *
  * @see https://reactflow.dev/api-reference/hooks/use-react-flow
  * @see https://reactflow.dev/api-reference/hooks/use-nodes-initialized
  * @see https://reactflow.dev/api-reference/types/node-change
  */
-function DagFlow({ graph, settings, layoutRequested }: IDagCanvasProps): JSX.Element {
+function DagFlow({ graph, settings, layoutRequested, addCellRequested }: IDagCanvasProps): JSX.Element {
   const model = graph.notebook;
   const [nodes, setNodes] = useState<CellNode[]>(() => Array.from(model.cells, cellToNode));
   const [edges, setEdges] = useState<Edge[]>(() => graph.wires.map(wireToEdge));
@@ -170,6 +190,7 @@ function DagFlow({ graph, settings, layoutRequested }: IDagCanvasProps): JSX.Ele
   const initialized = useNodesInitialized();
   const hasSize = useStore(s => s.width > 0 && s.height > 0);
   const instance = useReactFlow<CellNode, Edge>();
+  const store = useStoreApi<CellNode, Edge>();
 
   const refresh = useCallback(
     (_: unknown, change: IDagGraphChange) => {
@@ -224,6 +245,25 @@ function DagFlow({ graph, settings, layoutRequested }: IDagCanvasProps): JSX.Ele
   }, [initialized, hasSize]);
   const onLayoutRequested = useCallback(() => onLayout(direction), [onLayout, direction]);
   useLuminoSignal(layoutRequested, onLayoutRequested);
+  const onAddCell = useCallback(
+    (_: unknown, type: DagCellType) => {
+      const selected = instance.getNodes().filter(n => n.selected);
+      const index = insertIndexAfter(
+        graph.cellIds,
+        selected.map(n => n.id)
+      );
+      const { width, height, transform } = store.getState();
+      const position = selected.length
+        ? positionBelow(instance.getNodesBounds(selected))
+        : viewportCentre(width, height, transform, DEFAULT_NODE_SIZE);
+      const id = insertCell(model, index, type, position);
+      store.setState({ nodesSelectionActive: false }); // a box selection's overlay would otherwise move onto the new node
+      setNodes(current => current.map(n => (!!n.selected === (n.id === id) ? n : { ...n, selected: n.id === id })));
+      setEdges(current => current.map(e => (e.selected ? { ...e, selected: false } : e)));
+    },
+    [graph, instance, model, store]
+  );
+  useLuminoSignal(addCellRequested, onAddCell);
 
   const onNodesChange: OnNodesChange<CellNode> = useCallback(
     (changes: NodeChange<CellNode>[]) => {
@@ -291,6 +331,7 @@ function DagFlow({ graph, settings, layoutRequested }: IDagCanvasProps): JSX.Ele
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}

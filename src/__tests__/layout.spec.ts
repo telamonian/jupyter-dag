@@ -2,7 +2,7 @@
  * Unit tests for `dag/layout.ts` (the two dagre edge cases the layout code guards against) and
  * `readCellMetadata`.
  */
-import { layoutElements } from '../dag/layout';
+import { RANKSEP, edgeButtonAnchor, layoutElements, positionBelow, viewportCentre } from '../dag/layout';
 import { readCellMetadata } from '../dag/tokens';
 import type { Edge, Node } from '@xyflow/react';
 
@@ -34,5 +34,37 @@ describe('readCellMetadata', () => {
   it('drops non-finite positions and sizes', () => {
     const meta = readCellMetadata({ inputs: ['x'], position: { x: null, y: 0 }, width: null, height: 120 });
     expect(meta).toEqual({ inputs: ['x'], height: 120 });
+  });
+});
+
+describe('viewportCentre', () => {
+  it('converts the screen centre to flow coordinates and centres the node on it', () => {
+    expect(viewportCentre(800, 600, [100, 50, 2], { width: 360, height: 140 })).toEqual({
+      x: (400 - 100) / 2 - 180,
+      y: (300 - 50) / 2 - 70
+    });
+  });
+});
+
+describe('positionBelow', () => {
+  it('places a node one rank under a rectangle, left-aligned with it', () => {
+    expect(positionBelow({ x: 10, y: 20, width: 100, height: 50 })).toEqual({ x: 10, y: 70 + RANKSEP });
+  });
+});
+
+describe('edgeButtonAnchor', () => {
+  it('anchors at the source end of a downward edge', () => {
+    expect(edgeButtonAnchor({ sourceX: 0, sourceY: 10, targetX: 50, targetY: 100 })).toEqual({
+      x: 0,
+      y: 10,
+      alignY: 'top'
+    });
+  });
+  it('anchors at the target end of an upward edge', () => {
+    expect(edgeButtonAnchor({ sourceX: 0, sourceY: 10, targetX: 50, targetY: 5 })).toEqual({
+      x: 50,
+      y: 5,
+      alignY: 'bottom'
+    });
   });
 });
