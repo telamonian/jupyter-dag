@@ -121,3 +121,12 @@
 .jp-DagDocument .jp-Toolbar-item[data-jp-item-name='autoWire'] {
   margin-left: 32px;
 }
+
+/* The reactivity switch on the notebook toolbar: pressed looks like the debugger's bug button, a coloured glyph and no inset. */
+.jp-ReactiveButton[aria-pressed='true'] {
+  box-shadow: none;
+}
+
+.jp-ReactiveButton[aria-pressed='true'] path {
+  fill: var(--jp-brand-color1);
+}

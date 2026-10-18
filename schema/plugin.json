@@ -18,6 +18,10 @@
         "name": "openDag",
         "command": "jupyter-dag:open",
         "rank": 10
+      },
+      {
+        "name": "reactive",
+        "rank": 999
       }
     ],
     "DAG": [

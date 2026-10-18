@@ -52,7 +52,29 @@ the notebook panel marks its dependents stale too, and the session's signals so 
 or swap marks every node stale.
 
 `src/dag/cells.ts` inserts, deletes and clears cells without a notebook widget, mirroring the
-shared-model bodies of the `NotebookActions` functions, which need one.
+shared-model bodies of the `NotebookActions` functions, which need one. `src/dag/analysis.ts` is
+the per-cell analysis cache both executors share: it keeps each result with the source it came
+from and re-analyses only changed code cells, in one request.
+
+## The reactive notebook
+
+`src/reactive/` makes the ordinary notebook view reactive on kernels that analyse cells, behind a
+toolbar switch that sits left of the debugger's bug button and is enabled only for such kernels.
+The hook is the `INotebookCellExecutor` token, which every `NotebookActions.run*` call goes
+through: `reactive/executor.ts` provides it (with core's provider disabled in `package.json`) and
+hands each request to the notebook's `ReactiveController` (`reactive/controller.ts`), which
+passes it straight to the core `runCell` when the switch is off or the cell is not code, and
+otherwise queues it on a `ReactiveScheduler` (`reactive/scheduler.ts`). The scheduler, which
+knows cells only by id and is unit-tested with a fake host, serialises requests per notebook and
+treats everything queued at once as one batch: a cell that has not run since the kernel started
+first pulls in the never-run cells it depends on, in topological order; after a cell runs, the
+cells downstream of it that have already run are re-run once the batch's own requests are done;
+a cell runs at most once per batch, a failure ends the batch, and a cell that has run before is
+purged before it runs again. Prerequisites and dependents run with the triggering request's own
+callbacks, so `NotebookActions.executed` fires for them and the DAG view's records stay right.
+What counts as run comes from the kernel connection: the client reports every `execute_reply`
+with the cell id core stamps on each request (`cellExecuted`), whichever view sent it. The
+DAG view's executor calls the core `runCell` directly and so never passes through the token.
 
 ## The view
 
@@ -82,7 +104,10 @@ edge: the built-in bezier path plus a remove button at its upper end while selec
 
 ## Plugins and settings
 
-`src/dag/plugin.ts` has three plugins. The view plugin registers the widget factory, tracks open
+`src/dag/plugin.ts` has three plugins, and `src/reactive/plugin.ts` two more: the executor
+provider, which can depend on nothing because the notebook tracker depends on it, and the
+notebook plugin, which attaches a controller to every notebook panel and registers the switch as
+a toolbar factory item. The view plugin registers the widget factory, tracks open
 views for layout restore, adds the open, add-cell, run, auto-layout, interrupt, restart, undo
 and redo commands (`Z` and `Shift Z` undo and redo the notebook's last change while focus is in
 the DAG view but not in an editor), registers the toolbar items that are widgets rather than

@@ -143,7 +143,10 @@
     },
     "extension": true,
     "outputDir": "jupyter_dag/labextension",
-    "schemaDir": "schema"
+    "schemaDir": "schema",
+    "disabledExtensions": [
+      "@jupyterlab/notebook-extension:cell-executor"
+    ]
   },
   "prettier": {
     "singleQuote": true,
