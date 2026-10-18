@@ -1,0 +1,5 @@
+{
+  "argv": ["R", "--no-echo", "-e", "IRdag::main()", "--args", "{connection_file}"],
+  "display_name": "R (jupyter-dag)",
+  "language": "R"
+}
