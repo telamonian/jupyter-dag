@@ -12,7 +12,7 @@
 import React from 'react';
 import { ABCWidgetFactory, DocumentWidget } from '@jupyterlab/docregistry';
 import type { DocumentRegistry } from '@jupyterlab/docregistry';
-import type { INotebookCellExecutor, INotebookModel, INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
+import type { INotebookModel, INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
 import type { ISessionContext } from '@jupyterlab/apputils';
 import { LabIcon, ReactWidget } from '@jupyterlab/ui-components';
 import type { IRenderMimeRegistry } from '@jupyterlab/rendermime';
@@ -67,7 +67,6 @@ export class DagPanel extends ReactWidget {
     this.executor = new DagExecutor({
       graph: this.graph,
       sessionContext: this.context.sessionContext,
-      cellExecutor: options.cellExecutor,
       client: this.client,
       widgetFor: id => this.cellWidget(id),
       sessionDialogs: options.sessionDialogs,
@@ -270,8 +269,6 @@ export namespace DagPanel {
     rendermime: IRenderMimeRegistry;
     /** Maps a kernel's `language_info` to an editor mime type. */
     mimeTypeService: IEditorMimeTypeService;
-    /** JupyterLab's cell executor. */
-    cellExecutor: INotebookCellExecutor;
     /** The notebook tracker, to find the notebook panel on the same context. */
     notebookTracker: INotebookTracker;
     /** The settings, read at creation time. */
@@ -335,7 +332,6 @@ export class DagWidgetFactory extends ABCWidgetFactory<DagDocument, INotebookMod
     this._rendermime = options.rendermime;
     this._contentFactory = options.contentFactory;
     this._mimeTypeService = options.mimeTypeService;
-    this._cellExecutor = options.cellExecutor;
     this._notebookTracker = options.notebookTracker;
     this._sessionDialogs = options.sessionDialogs;
     this._settings = options.settings;
@@ -358,7 +354,6 @@ export class DagWidgetFactory extends ABCWidgetFactory<DagDocument, INotebookMod
       contentFactory: this._contentFactory,
       rendermime,
       mimeTypeService: this._mimeTypeService,
-      cellExecutor: this._cellExecutor,
       notebookTracker: this._notebookTracker,
       settings: this._settings(),
       sessionDialogs: this._sessionDialogs,
@@ -369,7 +364,6 @@ export class DagWidgetFactory extends ABCWidgetFactory<DagDocument, INotebookMod
   private _rendermime: IRenderMimeRegistry;
   private _contentFactory: NotebookPanel.IContentFactory;
   private _mimeTypeService: IEditorMimeTypeService;
-  private _cellExecutor: INotebookCellExecutor;
   private _notebookTracker: INotebookTracker;
   private _sessionDialogs?: ISessionContext.IDialogs;
   private _settings: () => IDagSettings;
@@ -384,8 +378,6 @@ export namespace DagWidgetFactory {
     contentFactory: NotebookPanel.IContentFactory;
     /** Maps a kernel's `language_info` to an editor mime type. */
     mimeTypeService: IEditorMimeTypeService;
-    /** JupyterLab's cell executor. */
-    cellExecutor: INotebookCellExecutor;
     /** The notebook tracker, to find the notebook panel on the same context. */
     notebookTracker: INotebookTracker;
     /** Read when a widget is created, so setting changes apply to the next DAG view. */

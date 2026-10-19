@@ -19,7 +19,7 @@ import {
   createToolbarFactory
 } from '@jupyterlab/apputils';
 import { IDocumentManager } from '@jupyterlab/docmanager';
-import { INotebookCellExecutor, INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
+import { INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
 import { IEditorServices } from '@jupyterlab/codeeditor';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
@@ -74,8 +74,9 @@ import type { IDagRunOptions } from './executor';
  * What each token is for. `INotebookTracker` finds the notebook panel on the same context (for
  * cell widgets and the open command's `currentWidget`); `IDocumentManager` opens notebooks as
  * DAGs; `IRenderMimeRegistry`, `IEditorServices` (its mime type service) and
- * `NotebookPanel.IContentFactory` build cell widgets; `INotebookCellExecutor` runs cells;
- * `ISettingRegistry` loads the settings. `IToolbarWidgetRegistry` is required rather than optional
+ * `NotebookPanel.IContentFactory` build cell widgets; `ISettingRegistry` loads the settings.
+ * Cells are run through `runCell` directly, not the `INotebookCellExecutor` token, which the
+ * reactive executor (`reactive/plugin.ts`) provides for the notebook panel's own runs. `IToolbarWidgetRegistry` is required rather than optional
  * because of the ordering above. Optional: `ILayoutRestorer` reopens DAG views on reload,
  * `ICommandPalette` lists the commands, `ISessionContextDialogs` provides the kernel picker,
  * `ITranslator` the translation bundle.
@@ -127,7 +128,6 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
     IRenderMimeRegistry,
     IEditorServices,
     NotebookPanel.IContentFactory,
-    INotebookCellExecutor,
     ISettingRegistry,
     IToolbarWidgetRegistry
   ],
@@ -140,7 +140,6 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
     rendermime: IRenderMimeRegistry,
     editorServices: IEditorServices,
     contentFactory: NotebookPanel.IContentFactory,
-    cellExecutor: INotebookCellExecutor,
     settingRegistry: ISettingRegistry,
     toolbarRegistry: IToolbarWidgetRegistry,
     restorer: ILayoutRestorer | null,
@@ -176,7 +175,6 @@ export const dagViewPlugin: JupyterFrontEndPlugin<IDagTracker> = {
       rendermime,
       contentFactory,
       mimeTypeService: editorServices.mimeTypeService,
-      cellExecutor,
       notebookTracker,
       settings: () => readSettings(settings.composite),
       sessionDialogs: sessionDialogs ?? undefined

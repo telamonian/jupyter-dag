@@ -1,16 +1,19 @@
 /**
- * Running cells in wire order through JupyterLab's own cell executor.
+ * Running cells in wire order through JupyterLab's own `runCell`.
  *
- * The executor never talks to the kernel directly: each cell goes through `INotebookCellExecutor`
- * (`@jupyterlab/notebook/src/tokens.ts:192`), the same object the notebook toolbar's Run button
- * uses, so kernel selection, markdown rendering, execution counts and error dialogs behave as
- * they do in the notebook. What this module adds is the order (from {@link topologicalOrder}), the
- * optional purge (unbinding what a cell's last run bound) before each code cell and when a cell is
+ * The executor never talks to the kernel directly: each cell goes through `runCell`
+ * (`@jupyterlab/notebook/src/cellexecutor.ts:25`), the function behind the notebook toolbar's Run
+ * button, so kernel selection, markdown rendering, execution counts and error dialogs behave as
+ * they do in the notebook. It is called directly rather than through the `INotebookCellExecutor`
+ * token: that token now resolves to the reactive executor (`reactive/executor.ts`), which must
+ * see only runs started from the notebook panel, since a DAG run on the same model already has
+ * its order. What this module adds is the order (from {@link topologicalOrder}), the optional
+ * purge (unbinding what a cell's last run bound) before each code cell and when a cell is
  * deleted, the bookkeeping of node states, and auto-wiring from the kernel's analysis.
  *
  * @module
  */
-import { KernelError, NotebookActions, StaticNotebook } from '@jupyterlab/notebook';
+import { KernelError, NotebookActions, StaticNotebook, runCell } from '@jupyterlab/notebook';
 import type { INotebookCellExecutor, Notebook } from '@jupyterlab/notebook';
 import { CodeCell } from '@jupyterlab/cells';
 import type { Cell } from '@jupyterlab/cells';
@@ -19,18 +22,11 @@ import type { Kernel, Session } from '@jupyterlab/services';
 import type { ITranslator } from '@jupyterlab/translation';
 import { Signal } from '@lumino/signaling';
 import type { IDisposable } from '@lumino/disposable';
-import { downstreamOf, inferWires, replaceWires, topologicalOrder, upstreamOf } from './wiring';
-import type { DagGraphModel, ICellNames } from './wiring';
+import { CellAnalysisCache } from './analysis';
+import { downstreamOf, replaceWires, topologicalOrder, upstreamOf } from './wiring';
+import type { DagGraphModel } from './wiring';
 import { FEATURE_ANALYZE, FEATURE_NAMESPACE_DELETE } from './protocol';
-import type { DagKernelClient, IAnalyzeCellInput, IAnalyzedCell } from './protocol';
-
-/** A cell's analysis together with the source it was computed from, so a changed source is re-analysed. */
-interface IAnalyzedSource {
-  /** The source text that was analysed. */
-  source: string;
-  /** What the kernel said about it. */
-  result: IAnalyzedCell;
-}
+import type { DagKernelClient, IAnalyzedCell } from './protocol';
 
 /**
  * The names a cell's last run bound that no other cell's last run also bound.
@@ -63,7 +59,7 @@ export interface IDagRunOptions {
 }
 
 /**
- * Runs cells in wire order through the core cell executor, so each run has the toolbar's semantics.
+ * Runs cells in wire order through the core `runCell`, so each run has the toolbar's semantics.
  *
  * @remarks
  * What `runCell` does. `runCell` (`@jupyterlab/notebook/src/cellexecutor.ts:25`) drives a live
@@ -92,11 +88,11 @@ export interface IDagRunOptions {
  * ({@link DagExecutor.forgetCell}) both unbind what the cell's last run bound, not what its
  * current source defines: if `a = 1` ran and the cell now reads `b = 2`, `a` has to go before `b`
  * is bound. So two records are kept per cell: the analysis of the source as written, with the
- * source it was computed from, and the `defined` list of the source that last ran successfully on
- * this kernel. Cells whose source changed since their analysis are re-analysed in one
- * `analyze_request` before a run and after a run from the notebook panel. Limitation: a cell run
- * from the notebook panel before this executor existed has no record, so its first DAG re-run
- * purges nothing.
+ * source it was computed from (a {@link CellAnalysisCache}), and the `defined` list of the source
+ * that last ran successfully on this kernel. Cells whose source changed since their analysis are
+ * re-analysed in one `analyze_request` before a run and after a run from the notebook panel.
+ * Limitation: a cell run from the notebook panel before this executor existed has no record, so
+ * its first DAG re-run purges nothing.
  *
  * Why the session's signals are watched. A restart, a kernel change or a shutdown empties the
  * namespace, so the run records are dropped and every code cell's node is marked stale on
@@ -109,13 +105,13 @@ export interface IDagRunOptions {
  */
 export class DagExecutor implements IDisposable {
   /**
-   * @param options - The graph, session, executor and client to run with; see {@link DagExecutor.IOptions}.
+   * @param options - The graph, session and client to run with; see {@link DagExecutor.IOptions}.
    */
   constructor(options: DagExecutor.IOptions) {
     this._graph = options.graph;
     this._sessionContext = options.sessionContext;
-    this._cellExecutor = options.cellExecutor;
     this._client = options.client;
+    this._analysis = new CellAnalysisCache(options.client);
     this._widgetFor = options.widgetFor;
     this._sessionDialogs = options.sessionDialogs;
     this._translator = options.translator;
@@ -176,7 +172,7 @@ export class DagExecutor implements IDisposable {
   async analyzeAll(): Promise<Map<string, IAnalyzedCell>> {
     this._analysis.clear();
     await this._analyzeChanged(this._graph.cellIds);
-    return new Map(Array.from(this._analysis, ([id, { result }]) => [id, result]));
+    return this._analysis.results();
   }
 
   /**
@@ -210,7 +206,7 @@ export class DagExecutor implements IDisposable {
    *
    * @remarks
    * The reactive reading of the notebook, done once on demand: code cells whose source changed
-   * since their analysis are analysed in one request, then {@link inferWires} joins each cell's
+   * since their analysis are analysed in one request, then `inferWires` (`wiring.ts`) joins each cell's
    * referenced names to the nearest cell above it defining them, wrapping round to the bottom of
    * the notebook when nothing above does, and {@link replaceWires} writes the result as one undo
    * step. Cells that did not parse take part with no names, so they lose their wires. Cells whose
@@ -223,14 +219,7 @@ export class DagExecutor implements IDisposable {
     }
     const ids = this._graph.cellIds;
     await this._analyzeChanged(ids);
-    const cells: ICellNames[] = [];
-    for (const id of ids) {
-      const analysed = this._analysis.get(id)?.result;
-      if (analysed && analysed.status !== 'error') {
-        cells.push({ id, defined: analysed.defined, referenced: analysed.referenced });
-      }
-    }
-    const wires = inferWires(cells);
+    const wires = this._analysis.wires(ids);
     this._graph.markStale(replaceWires(this._graph, wires));
     return wires.length;
   }
@@ -280,7 +269,7 @@ export class DagExecutor implements IDisposable {
       translator: this._translator
     };
     try {
-      return await this._cellExecutor.runCell(opts);
+      return await runCell(opts);
     } catch (e) {
       if (e instanceof KernelError) {
         return false;
@@ -313,31 +302,19 @@ export class DagExecutor implements IDisposable {
    * @param ids - Cell ids; markdown and raw cells, and cells whose stored source still matches, are skipped.
    */
   private async _analyzeChanged(ids: Iterable<string>): Promise<void> {
-    const cells: IAnalyzeCellInput[] = [];
+    const cells = [];
     for (const id of ids) {
       const cell = this._graph.findCell(id);
-      if (!cell || cell.type !== 'code') {
-        continue;
-      }
-      const source = cell.sharedModel.getSource();
-      if (this._analysis.get(id)?.source !== source) {
-        cells.push({ cell_id: id, code: source });
+      if (cell) {
+        cells.push(cell);
       }
     }
-    if (!cells.length) {
-      return;
-    }
-    for (const result of await this._client.analyze(cells)) {
-      const input = cells.find(c => c.cell_id === result.cell_id);
-      if (input) {
-        this._analysis.set(result.cell_id, { source: input.code, result });
-      }
-    }
+    await this._analysis.refresh(cells);
   }
 
   /** Record what a cell's successful run bound, from its current analysis; nothing when there is none. */
   private _recordRun(cellId: string): void {
-    const analysed = this._analysis.get(cellId)?.result;
+    const analysed = this._analysis.get(cellId);
     if (analysed && analysed.status !== 'error') {
       this._executed.set(cellId, analysed.defined);
     } else {
@@ -427,12 +404,11 @@ export class DagExecutor implements IDisposable {
   }
   private _graph: DagGraphModel;
   private _sessionContext: ISessionContext;
-  private _cellExecutor: INotebookCellExecutor;
   private _client: DagKernelClient;
   private _widgetFor: (cellId: string) => Cell | undefined;
   private _sessionDialogs?: ISessionContext.IDialogs;
   private _translator?: ITranslator;
-  private _analysis = new Map<string, IAnalyzedSource>();
+  private _analysis: CellAnalysisCache;
   private _executed = new Map<string, string[]>();
   private _isDisposed = false;
 }
@@ -444,8 +420,6 @@ export namespace DagExecutor {
     graph: DagGraphModel;
     /** The document's session context, for the kernel to run in. */
     sessionContext: ISessionContext;
-    /** JupyterLab's cell executor (the `INotebookCellExecutor` token). */
-    cellExecutor: INotebookCellExecutor;
     /** The kernel client, for analysis and purges. */
     client: DagKernelClient;
     /**

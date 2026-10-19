@@ -139,6 +139,23 @@ export type IDagExecuteReplyContent = KernelMessage.IExecuteReplyMsg['content'] 
   /** The delta the kernel added; absent on kernels without the feature. */
   namespace_delta?: INamespaceDelta;
 };
+/**
+ * One cell's run, as seen on the kernel connection: the argument of {@link DagKernelClient.cellExecuted}.
+ *
+ * @remarks
+ * `CodeCell.execute` stamps every `execute_request` it sends with the cell's id in the message
+ * metadata (`@jupyterlab/cells/src/widget.ts:1757-1762`), whichever widget or extension asked for
+ * the run, so the reply can be matched back to its cell by `parent_header.msg_id`. Purges and
+ * other requests without a `cellId` are not reported.
+ */
+export interface ICellExecution {
+  /** The id of the cell whose request this reply answers. */
+  cellId: string;
+  /** The reply status: `'ok'`, `'error'`, or `'abort'` for a request the kernel skipped after an error. */
+  status: KernelMessage.IExecuteReplyMsg['content']['status'];
+  /** The `namespace_delta` of an ok reply from a kernel that sends one. */
+  delta?: INamespaceDelta;
+}
 
 /**
  * Read the `namespace_delta` off an `execute_reply`, if the reply carries one.
@@ -521,6 +538,19 @@ export class DagKernelClient implements IDisposable {
     return this._namespaceDelta;
   }
   /**
+   * Emitted for every `execute_reply` to a request that named its cell, whoever sent the request.
+   *
+   * @remarks
+   * Fires before the sender's `runCell` resolves: `anyMessage` is emitted as soon as the websocket
+   * delivers a message (`@jupyterlab/services/src/kernel/default.ts:1817`), while the future that
+   * resolves the run handles it later, through the connection's message chain (`default.ts:1805`),
+   * and only once the idle status has followed (`future.ts:241-270`). Runs made by another client,
+   * as in a shared session, never pass through this connection and are not seen.
+   */
+  get cellExecuted(): ISignal<this, ICellExecution> {
+    return this._cellExecuted;
+  }
+  /**
    * Emitted after every detection: kernel start, change or restart, and explicit
    * {@link DagKernelClient.detectFeatures} calls; the argument is the new feature set.
    */
@@ -595,13 +625,25 @@ export class DagKernelClient implements IDisposable {
   ): void {
     oldValue?.anyMessage.disconnect(this._onAnyMessage, this);
     newValue?.anyMessage.connect(this._onAnyMessage, this);
+    this._requestCells.clear();
     void this.detectFeatures();
   }
   private _onAnyMessage(_: unknown, { msg, direction }: Kernel.IAnyMessageArgs): void {
-    if (direction === 'recv' && KernelMessage.isExecuteReplyMsg(msg)) {
+    if (direction === 'send' && msg.header.msg_type === 'execute_request') {
+      const cellId = msg.metadata.cellId;
+      if (typeof cellId === 'string') {
+        this._requestCells.set(msg.header.msg_id, cellId);
+      }
+    } else if (direction === 'recv' && KernelMessage.isExecuteReplyMsg(msg)) {
       const delta = readNamespaceDelta(msg);
       if (delta) {
         this._namespaceDelta.emit(delta);
+      }
+      const requestId = (msg.parent_header as Partial<KernelMessage.IHeader>).msg_id;
+      const cellId = requestId === undefined ? undefined : this._requestCells.get(requestId);
+      if (requestId !== undefined && cellId !== undefined) {
+        this._requestCells.delete(requestId);
+        this._cellExecuted.emit({ cellId, status: msg.content.status, delta });
       }
     }
   }
@@ -639,6 +681,8 @@ export class DagKernelClient implements IDisposable {
   private _features = new Set<string>();
   private _transport: IDagTransport | null = null;
   private _namespaceDelta = new Signal<this, INamespaceDelta>(this);
+  private _cellExecuted = new Signal<this, ICellExecution>(this);
+  private _requestCells = new Map<string, string>();
   private _featuresChanged = new Signal<this, ReadonlySet<string>>(this);
   private _redetect = false;
   private _generation = 0;
